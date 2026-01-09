@@ -1,0 +1,15 @@
+[submodule "external/selective-synaptic-dampening"]
+	path = external/selective-synaptic-dampening
+	url = https://github.com/if-loops/selective-synaptic-dampening.git
+[submodule "SCRUB"]
+	path = SCRUB
+	url = https://github.com/meghdadk/SCRUB.git
+[submodule "Machine_Unlearning_Algorithms"]
+	path = Machine_Unlearning_Algorithms
+	url = https://github.com/Yilin1010/Machine_Unlearning_Algorithms.git
+[submodule "mia-disparity"]
+	path = mia-disparity
+	url = https://github.com/RPI-DSPlab/mia-disparity.git
+[submodule "llm_unlearning"]
+	path = llm_unlearning
+	url = https://github.com/karuna-bhaila/llm_unlearning.git
