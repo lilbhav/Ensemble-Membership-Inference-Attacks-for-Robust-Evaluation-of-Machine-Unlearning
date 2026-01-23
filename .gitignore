@@ -1,0 +1,6 @@
+
+# Data and model directories
+data/raw/
+models/
+*.pt
+*.pth
