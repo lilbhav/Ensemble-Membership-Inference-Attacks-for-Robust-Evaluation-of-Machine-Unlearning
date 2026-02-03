@@ -1,0 +1,32 @@
+# SCRUB Unlearning Experiment Configuration - GPU Optimized
+
+# Training parameters
+epochs: 10
+learning_rate: 0.01
+batch_size: 512
+
+# KD parameters
+kd_T: 4.0
+msteps: 0
+t_opt_gamma: 1.0
+t_opt_alpha: 0.9
+
+# Data parameters
+dataset: cifar10
+dataroot: ./data/raw
+forget_fraction: 0.1
+seed: 42
+
+# Checkpoint and logging
+check_path: ./results/scrub_unlearned_model.pt
+print_accuracies: true
+
+# Evaluation parameters
+eval_every: 1
+max_train_samples: null
+max_eval_samples: null
+sample_fraction: null
+
+# Data loading parameters
+num_workers: 4
+pin_memory: true
