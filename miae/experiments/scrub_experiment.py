@@ -83,8 +83,13 @@ def scrub(loaders, args):
 
     # Define the optimizer (configurable)
     weight_decay = getattr(args, "weight_decay", 1e-4)
-    optimizer = optim.AdamW(trainable_list.parameters(), lr=learning_rate, weight_decay=weight_decay)
-    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
+    optimizer = optim.SGD(
+        trainable_list.parameters(),
+        lr=learning_rate,
+        momentum=0.9,
+        weight_decay=weight_decay,
+        nesterov=True,
+    )
     
     # Add teacher model to the module list
     module_list.append(model_t)
@@ -117,18 +122,15 @@ def scrub(loaders, args):
         except (TypeError, ValueError):
             return repr(value)
 
-    # Training loop
-    for epoch in range(1, epochs + 1):
-        print(f"[Epoch {epoch}/{epochs}] Starting epoch...")
-        sys.stdout.flush()
-        
-        # Train model
-        maximize_loss = 0
-        if epoch <= msteps:
+    # Phase 1: Forget-only (maximize loss on forget set)
+    if msteps > 0:
+        for f_epoch in range(1, msteps + 1):
+            print(f"[Forget Phase {f_epoch}/{msteps}] Starting epoch...")
+            sys.stdout.flush()
             print(f"  - Maximizing loss on forget set...")
             sys.stdout.flush()
             try:
-                maximize_loss = train_distill(epoch, train_forget_loader, module_list, None, 
+                maximize_loss = train_distill(f_epoch, train_forget_loader, module_list, None,
                                              criterion_list, optimizer, t_opt, "maximize", quiet=False)
                 print(f"    Done: maximize_loss = {maximize_loss:.4f}")
                 sys.stdout.flush()
@@ -136,7 +138,12 @@ def scrub(loaders, args):
                 print(f"    ERROR during maximize: {e}")
                 sys.stdout.flush()
                 raise
-        
+
+    # Phase 2: Retain training
+    for epoch in range(1, epochs + 1):
+        print(f"[Retain Phase {epoch}/{epochs}] Starting epoch...")
+        sys.stdout.flush()
+
         print(f"  - Minimizing loss on retain set...")
         sys.stdout.flush()
         try:
@@ -151,7 +158,6 @@ def scrub(loaders, args):
             raise
 
         losses.append(train_loss)
-        scheduler.step()
         epoch_list.append(epoch)
         
         # Compute accuracies on all sets (optional)
@@ -178,8 +184,7 @@ def scrub(loaders, args):
             vf_accs.append(None)
 
         print(
-            f"Epoch {epoch}: maximize loss: {fmt_metric(maximize_loss, precision=8)}, "
-            f"minimize loss: {fmt_metric(train_loss, precision=8)}, "
+            f"Epoch {epoch}: minimize loss: {fmt_metric(train_loss, precision=8)}, "
             f"train_acc: {fmt_metric(train_acc, precision=6)}"
         )
 
