@@ -1,0 +1,24 @@
+Creating retain/forget splits...
+  Retain set size: 45000
+  Forget set size: 5000
+Creating data loaders...
+Running SCRUB unlearning...
+Epoch 1: maximize loss: 0.0000, minimize loss: 0.0000, train_acc: 0.0000
+   tr_acc: 0.1194
+   tf_acc: 0.1210
+   vr_acc: 0.1194
+   vf_acc: 0.1210
+Epoch 2: maximize loss: 0.0000, minimize loss: 0.0000, train_acc: 0.0000
+   tr_acc: 0.0882
+   tf_acc: 0.0874
+   vr_acc: 0.0882
+   vf_acc: 0.0874
+Epoch 3: maximize loss: 0.0000, minimize loss: 0.0000, train_acc: 0.0000
+   tr_acc: 0.1058
+   tf_acc: 0.1086
+   vr_acc: 0.1058
+   vf_acc: 0.1086
+
+SCRUB unlearning completed!
+Final train retain acc: 0.1058
+Final valid forget acc: 0.1086

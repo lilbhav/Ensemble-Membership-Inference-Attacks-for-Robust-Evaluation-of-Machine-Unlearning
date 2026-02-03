@@ -1,0 +1,43 @@
+DATASET:
+  Dataset: CIFAR-10
+  Retain set size: 45000
+  Forget set size: 5000
+  Forget fraction: 0.1 (10%)
+
+PRE-TRAINED MODEL:
+  Model: ResNet-18
+  Checkpoint: ./models/pretrained_cifar10.pt
+  Pretrained Accuracy: 70.36%
+
+UNLEARNING CONFIGURATION:
+  Method: Gradient Ascent
+  Epochs: 5
+  Learning rate: 1e-4
+  Device: cpu
+
+UNLEARNING RESULTS BY EPOCH:
+
+  Epoch 1:
+    Avg neg_loss: -0.7014
+    Retain set accuracy: 76.35%
+
+  Epoch 2:
+    Avg neg_loss: -0.7365
+    Retain set accuracy: 75.27%
+
+  Epoch 3:
+    Avg neg_loss: -0.8003
+    Retain set accuracy: 71.98%
+
+  Epoch 4:
+    Avg neg_loss: -0.9519
+    Retain set accuracy: 64.34%
+
+  Epoch 5:
+    Avg neg_loss: -1.2551
+    Retain set accuracy: 55.71%
+
+
+FINAL RESULTS:
+  Final retain accuracy: 55.71%
+  Unlearned model saved to: ./results/unlearned_model/unlearned_model.pt
