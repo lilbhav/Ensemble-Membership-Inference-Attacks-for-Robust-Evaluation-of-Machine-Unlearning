@@ -1,15 +1,14 @@
-# SCRUB Unlearning Experiment Configuration - GPU Optimized
+# SCRUB Unlearning Experiment Configuration - Retain-focused
 
-# Training parameters
-epochs: 15
-learning_rate: 0.01
-batch_size: 512
+epochs: 20
+learning_rate: 0.005
+batch_size: 256
 
 # KD parameters
-kd_T: 4.0
-msteps: 3
-t_opt_gamma: 0.7
-t_opt_alpha: 1.2
+kd_T: 6.0
+msteps: 6
+t_opt_gamma: 0.4
+t_opt_alpha: 2.0
 
 # Data parameters
 dataset: cifar10
