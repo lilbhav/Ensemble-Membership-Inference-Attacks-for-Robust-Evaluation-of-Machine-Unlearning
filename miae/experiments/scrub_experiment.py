@@ -127,7 +127,7 @@ def scrub(loaders, args):
             sys.stdout.flush()
             try:
                 maximize_loss = train_distill(epoch, train_forget_loader, module_list, None, 
-                                             criterion_list, optimizer, t_opt, "maximize", quiet=True)
+                                             criterion_list, optimizer, t_opt, "maximize", quiet=False)
                 print(f"    Done: maximize_loss = {maximize_loss:.4f}")
                 sys.stdout.flush()
             except Exception as e:
@@ -139,7 +139,7 @@ def scrub(loaders, args):
         sys.stdout.flush()
         try:
             train_acc, train_loss = train_distill(epoch, train_retain_loader, module_list, None, 
-                                                 criterion_list, optimizer, t_opt, "minimize", quiet=True)
+                                                 criterion_list, optimizer, t_opt, "minimize", quiet=False)
             print(f"    Done: train_loss = {fmt_metric(train_loss, precision=8)}")
             print(f"    Raw: train_loss={train_loss!r}, train_acc={train_acc!r}")
             sys.stdout.flush()
@@ -189,6 +189,7 @@ def scrub(loaders, args):
 
     # Save a copy of the student model to use in evaluation
     if hasattr(args, 'check_path') and args.check_path is not None:
+        os.makedirs(os.path.dirname(args.check_path), exist_ok=True)
         torch.save(model_s.state_dict(), args.check_path)
 
     history = {
@@ -217,28 +218,6 @@ def compute_accuracy(model, loader, device):
             correct += (predicted == targets).sum().item()
     
     return correct / total if total > 0 else 0.0
-
-
-def maybe_subsample(dataset, max_samples=None, fraction=None, seed=0):
-    """Optionally subsample a dataset by max_samples or fraction."""
-    if dataset is None:
-        return dataset
-    length = len(dataset)
-    if length == 0:
-        return dataset
-
-    target = length
-    if fraction is not None and fraction > 0 and fraction < 1:
-        target = max(1, int(length * fraction))
-    if max_samples is not None and max_samples > 0:
-        target = min(target, max_samples)
-
-    if target >= length:
-        return dataset
-
-    generator = torch.Generator().manual_seed(seed)
-    indices = torch.randperm(length, generator=generator)[:target].tolist()
-    return Subset(dataset, indices)
 
 
 def main():
@@ -279,31 +258,8 @@ def main():
     print(f"  Retain set size: {len(retain_set)}")
     print(f"  Forget set size: {len(forget_set)}")
 
-    # Optionally subsample for faster iterations
-    retain_set = maybe_subsample(
-        retain_set,
-        max_samples=args.max_train_samples,
-        fraction=args.sample_fraction,
-        seed=args.seed
-    )
-    forget_set = maybe_subsample(
-        forget_set,
-        max_samples=args.max_train_samples,
-        fraction=args.sample_fraction,
-        seed=args.seed + 1
-    )
-    eval_retain_set = maybe_subsample(
-        retain_set,
-        max_samples=args.max_eval_samples,
-        fraction=None,
-        seed=args.seed
-    )
-    eval_forget_set = maybe_subsample(
-        forget_set,
-        max_samples=args.max_eval_samples,
-        fraction=None,
-        seed=args.seed + 1
-    )
+    eval_retain_set = retain_set
+    eval_forget_set = forget_set
 
     print(f"  Retain set size (used): {len(retain_set)}")
     print(f"  Forget set size (used): {len(forget_set)}")
