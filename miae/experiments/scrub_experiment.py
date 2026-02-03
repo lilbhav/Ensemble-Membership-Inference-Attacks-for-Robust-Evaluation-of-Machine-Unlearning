@@ -81,8 +81,10 @@ def scrub(loaders, args):
     criterion_kd = DistillKL(kd_T)          # Placeholder for consistency
     criterion_list = nn.ModuleList([criterion_cls, criterion_div, criterion_kd])
 
-    # Define the optimizer
-    optimizer = optim.Adam(trainable_list.parameters(), lr=learning_rate)
+    # Define the optimizer (configurable)
+    weight_decay = getattr(args, "weight_decay", 1e-4)
+    optimizer = optim.AdamW(trainable_list.parameters(), lr=learning_rate, weight_decay=weight_decay)
+    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
     
     # Add teacher model to the module list
     module_list.append(model_t)
@@ -149,6 +151,7 @@ def scrub(loaders, args):
             raise
 
         losses.append(train_loss)
+        scheduler.step()
         epoch_list.append(epoch)
         
         # Compute accuracies on all sets (optional)
