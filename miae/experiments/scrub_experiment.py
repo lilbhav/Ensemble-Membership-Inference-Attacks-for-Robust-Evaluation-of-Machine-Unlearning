@@ -84,7 +84,8 @@ def scrub(loaders, args):
     # Loss functions
     criterion_cls = nn.CrossEntropyLoss()
     criterion_div = DistillKL(kd_T)
-    criterion_list = nn.ModuleList([criterion_cls, criterion_div])
+    criterion_kd = DistillKL(kd_T)  # Placeholder for interface consistency
+    criterion_list = nn.ModuleList([criterion_cls, criterion_div, criterion_kd])
 
     # Optimizers
     optimizer_forget = optim.SGD(
