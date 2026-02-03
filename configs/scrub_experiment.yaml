@@ -1,15 +1,16 @@
-# SCRUB Unlearning Experiment Configuration - Retain-focused
+# SCRUB Unlearning Experiment Configuration (Retain-Optimized)
 
-epochs: 20
-learning_rate: 0.005
+# Training parameters
+epochs: 15
+learning_rate: 0.003
 batch_size: 256
 weight_decay: 0.0001
 
-# KD parameters
-kd_T: 6.0
-msteps: 6
-t_opt_gamma: 0.4
-t_opt_alpha: 2.0
+# Knowledge Distillation / SCRUB parameters
+kd_T: 8.0        # Higher temperature = smoother targets = better retention
+msteps: 4        # Fewer forget steps = less collateral damage
+t_opt_gamma: 0.7 # More weight on classification loss
+t_opt_alpha: 1.2 # Less aggressive forgetting
 
 # Data parameters
 dataset: cifar10
