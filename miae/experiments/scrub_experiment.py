@@ -107,6 +107,14 @@ def scrub(loaders, args):
     t_opt.beta = 0
     t_opt.print_freq = 0
 
+    def fmt_metric(value, precision=6):
+        if value is None:
+            return "None"
+        try:
+            return f"{value:.{precision}f}"
+        except (TypeError, ValueError):
+            return repr(value)
+
     # Training loop
     for epoch in range(1, epochs + 1):
         print(f"[Epoch {epoch}/{epochs}] Starting epoch...")
@@ -132,7 +140,8 @@ def scrub(loaders, args):
         try:
             train_acc, train_loss = train_distill(epoch, train_retain_loader, module_list, None, 
                                                  criterion_list, optimizer, t_opt, "minimize", quiet=True)
-            print(f"    Done: train_loss = {train_loss:.4f}")
+            print(f"    Done: train_loss = {fmt_metric(train_loss, precision=8)}")
+            print(f"    Raw: train_loss={train_loss!r}, train_acc={train_acc!r}")
             sys.stdout.flush()
         except Exception as e:
             print(f"    ERROR during minimize: {e}")
@@ -165,7 +174,11 @@ def scrub(loaders, args):
             vr_accs.append(None)
             vf_accs.append(None)
 
-        print(f"Epoch {epoch}: maximize loss: {maximize_loss:.4f}, minimize loss: {train_loss:.4f}, train_acc: {train_acc:.4f}")
+        print(
+            f"Epoch {epoch}: maximize loss: {fmt_metric(maximize_loss, precision=8)}, "
+            f"minimize loss: {fmt_metric(train_loss, precision=8)}, "
+            f"train_acc: {fmt_metric(train_acc, precision=6)}"
+        )
 
         # Print epoch progress
         if args.print_accuracies and acc_dict is not None:
@@ -235,8 +248,6 @@ def main():
     parser = argparse.ArgumentParser(description="Run SCRUB unlearning experiment")
     parser.add_argument('--config', type=str, default='./configs/scrub_experiment.yaml',
                         help='Path to YAML config file')
-    parser.add_argument('--fast-dev-run', action='store_true', default=False,
-                        help='Run a very small/fast configuration for debugging.')
     
     cli_args = parser.parse_args()
 
@@ -247,21 +258,6 @@ def main():
     with open(cli_args.config, 'r') as f:
         config_dict = yaml.safe_load(f)
     args = SimpleNamespace(**config_dict)
-
-    # Override with CLI args
-    if cli_args.fast_dev_run:
-        args.fast_dev_run = True
-    else:
-        args.fast_dev_run = False
-
-    if args.fast_dev_run:
-        args.epochs = 3
-        args.max_train_batches = 50
-        args.max_eval_batches = 10
-        args.eval_every = 1
-        args.sample_fraction = 0.1
-        args.max_train_samples = 5000
-        args.max_eval_samples = 1000
 
     # ========== 1. LOAD DATA ==========
     print("Loading dataset...")
