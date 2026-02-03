@@ -1,15 +1,15 @@
 # SCRUB Unlearning Experiment Configuration - GPU Optimized
 
 # Training parameters
-epochs: 10
+epochs: 15
 learning_rate: 0.01
 batch_size: 512
 
 # KD parameters
 kd_T: 4.0
-msteps: 0
-t_opt_gamma: 1.0
-t_opt_alpha: 0.9
+msteps: 3
+t_opt_gamma: 0.7
+t_opt_alpha: 1.2
 
 # Data parameters
 dataset: cifar10

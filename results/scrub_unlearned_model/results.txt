@@ -1,24 +1,118 @@
+Loading dataset...
+Downloading https://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz to ./data/raw/cifar-10-python.tar.gz
+100% 170498071/170498071 [00:05<00:00, 30858165.73it/s]
+Extracting ./data/raw/cifar-10-python.tar.gz to ./data/raw
 Creating retain/forget splits...
   Retain set size: 45000
   Forget set size: 5000
+  Retain set size (used): 45000
+  Forget set size (used): 5000
 Creating data loaders...
+Data loaders created. Training will start now...
+Configuration: epochs=10, batch_size=512, device=cuda
 Running SCRUB unlearning...
-Epoch 1: maximize loss: 0.0000, minimize loss: 0.0000, train_acc: 0.0000
-   tr_acc: 0.1194
-   tf_acc: 0.1210
-   vr_acc: 0.1194
-   vf_acc: 0.1210
-Epoch 2: maximize loss: 0.0000, minimize loss: 0.0000, train_acc: 0.0000
-   tr_acc: 0.0882
-   tf_acc: 0.0874
-   vr_acc: 0.0882
-   vf_acc: 0.0874
-Epoch 3: maximize loss: 0.0000, minimize loss: 0.0000, train_acc: 0.0000
-   tr_acc: 0.1058
-   tf_acc: 0.1086
-   vr_acc: 0.1058
-   vf_acc: 0.1086
+Using device: cuda
+[Epoch 1/10] Starting epoch...
+  - Minimizing loss on retain set...
+ * Acc@1 41.560 
+    Done: train_loss = 1.80870709
+    Raw: train_loss=1.8087070890638564, train_acc=tensor(41.5600, device='cuda:0')
+Epoch 1: maximize loss: 0.00000000, minimize loss: 1.80870709, train_acc: 41.560001
+   tr_acc: 0.4598
+   tf_acc: 0.4576
+   vr_acc: 0.4598
+   vf_acc: 0.4576
+[Epoch 2/10] Starting epoch...
+  - Minimizing loss on retain set...
+ * Acc@1 48.356 
+    Done: train_loss = 1.50868075
+    Raw: train_loss=1.508680746714274, train_acc=tensor(48.3556, device='cuda:0')
+Epoch 2: maximize loss: 0.00000000, minimize loss: 1.50868075, train_acc: 48.355556
+   tr_acc: 0.4992
+   tf_acc: 0.4912
+   vr_acc: 0.4992
+   vf_acc: 0.4912
+[Epoch 3/10] Starting epoch...
+  - Minimizing loss on retain set...
+ * Acc@1 52.642 
+    Done: train_loss = 1.43412444
+    Raw: train_loss=1.4341244376924303, train_acc=tensor(52.6422, device='cuda:0')
+Epoch 3: maximize loss: 0.00000000, minimize loss: 1.43412444, train_acc: 52.642223
+   tr_acc: 0.5459
+   tf_acc: 0.5298
+   vr_acc: 0.5459
+   vf_acc: 0.5298
+[Epoch 4/10] Starting epoch...
+  - Minimizing loss on retain set...
+ * Acc@1 56.936 
+    Done: train_loss = 1.36572487
+    Raw: train_loss=1.3657248736487495, train_acc=tensor(56.9356, device='cuda:0')
+Epoch 4: maximize loss: 0.00000000, minimize loss: 1.36572487, train_acc: 56.935555
+   tr_acc: 0.5983
+   tf_acc: 0.5776
+   vr_acc: 0.5983
+   vf_acc: 0.5776
+[Epoch 5/10] Starting epoch...
+  - Minimizing loss on retain set...
+ * Acc@1 61.836 
+    Done: train_loss = 1.29164882
+    Raw: train_loss=1.2916488226360745, train_acc=tensor(61.8356, device='cuda:0')
+Epoch 5: maximize loss: 0.00000000, minimize loss: 1.29164882, train_acc: 61.835556
+   tr_acc: 0.6498
+   tf_acc: 0.6156
+   vr_acc: 0.6498
+   vf_acc: 0.6156
+[Epoch 6/10] Starting epoch...
+  - Minimizing loss on retain set...
+ * Acc@1 66.669 
+    Done: train_loss = 1.22213556
+    Raw: train_loss=1.222135561349657, train_acc=tensor(66.6689, device='cuda:0')
+Epoch 6: maximize loss: 0.00000000, minimize loss: 1.22213556, train_acc: 66.668892
+   tr_acc: 0.6832
+   tf_acc: 0.6358
+   vr_acc: 0.6832
+   vf_acc: 0.6358
+[Epoch 7/10] Starting epoch...
+  - Minimizing loss on retain set...
+ * Acc@1 70.742 
+    Done: train_loss = 1.15978035
+    Raw: train_loss=1.1597803481419882, train_acc=tensor(70.7422, device='cuda:0')
+Epoch 7: maximize loss: 0.00000000, minimize loss: 1.15978035, train_acc: 70.742226
+   tr_acc: 0.7210
+   tf_acc: 0.6536
+   vr_acc: 0.7210
+   vf_acc: 0.6536
+[Epoch 8/10] Starting epoch...
+  - Minimizing loss on retain set...
+ * Acc@1 74.698 
+    Done: train_loss = 1.09686035
+    Raw: train_loss=1.0968603506300185, train_acc=tensor(74.6978, device='cuda:0')
+Epoch 8: maximize loss: 0.00000000, minimize loss: 1.09686035, train_acc: 74.697777
+   tr_acc: 0.7598
+   tf_acc: 0.6710
+   vr_acc: 0.7598
+   vf_acc: 0.6710
+[Epoch 9/10] Starting epoch...
+  - Minimizing loss on retain set...
+ * Acc@1 78.458 
+    Done: train_loss = 1.03602070
+    Raw: train_loss=1.0360206988228693, train_acc=tensor(78.4578, device='cuda:0')
+Epoch 9: maximize loss: 0.00000000, minimize loss: 1.03602070, train_acc: 78.457779
+   tr_acc: 0.8099
+   tf_acc: 0.6980
+   vr_acc: 0.8099
+   vf_acc: 0.6980
+[Epoch 10/10] Starting epoch...
+  - Minimizing loss on retain set...
+ * Acc@1 82.293 
+    Done: train_loss = 0.97228195
+    Raw: train_loss=0.9722819457160102, train_acc=tensor(82.2933, device='cuda:0')
+Epoch 10: maximize loss: 0.00000000, minimize loss: 0.97228195, train_acc: 82.293335
+   tr_acc: 0.8415
+   tf_acc: 0.7134
+   vr_acc: 0.8415
+   vf_acc: 0.7134
 
 SCRUB unlearning completed!
-Final train retain acc: 0.1058
-Final valid forget acc: 0.1086
+Final train retain acc: 0.8415
+Final valid forget acc: 0.7134
