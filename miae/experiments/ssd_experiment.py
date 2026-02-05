@@ -118,12 +118,12 @@ def load_model(dataset: str, checkpoint_path: str, device: torch.device) -> nn.M
             "Please run: python scripts/train_resnet18_cifar10.py"
         )
 
-    model = models.resnet18(pretrained=False)
+    model = models.resnet18(weights=None)
     model.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False)
     model.maxpool = nn.Identity()
     model.fc = nn.Linear(model.fc.in_features, get_num_classes("cifar10"))
 
-    model.load_state_dict(torch.load(checkpoint_path, map_location=device))
+    model.load_state_dict(torch.load(checkpoint_path, map_location=device, weights_only=True))
     return model.to(device)
 
 
