@@ -8,8 +8,8 @@ pin_memory: true
 model_path: "./models/pretrained_cifar10.pt"
 check_path: "./results/ssd_unlearned_model.pt"
 learning_rate: 0.0001
-dampening_constant: 0.1
-selection_weighting: 0.1
+dampening_constant: 1.0
+selection_weighting: 10.0
 eval_every: 1
 print_accuracies: true
 device: null
