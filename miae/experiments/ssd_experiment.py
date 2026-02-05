@@ -20,7 +20,8 @@ if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
 from data.loaders import load_dataset, get_num_classes
-from utils.splits import create_retain_forget_split
+from utils.splits import create_retain_forget_split, load_split
+from utils.metrics import compute_accuracy, log_accuracies
 
 # Add SSD src to path for third-party import (after repo utils import to avoid shadowing)
 SSD_SRC_DIR = os.path.join(
@@ -49,6 +50,7 @@ class SSDInput:
     eval_every: int
     print_accuracies: bool
     device: Optional[str] = None
+    results_path: Optional[str] = None
 
 
 class IndexedDataset(Dataset):
@@ -67,27 +69,6 @@ class IndexedDataset(Dataset):
         else:
             raise ValueError("Dataset must return at least (x, y).")
         return x, idx, y
-
-
-def compute_accuracy(model: nn.Module, loader: DataLoader, device: torch.device) -> float:
-    """Compute accuracy on a given loader."""
-    correct = 0
-    total = 0
-    model.eval()
-
-    with torch.no_grad():
-        for batch in loader:
-            if len(batch) == 3:
-                inputs, _, targets = batch
-            else:
-                inputs, targets = batch
-            inputs, targets = inputs.to(device), targets.to(device)
-            outputs = model(inputs)
-            _, predicted = torch.max(outputs.data, 1)
-            total += targets.size(0)
-            correct += (predicted == targets).sum().item()
-
-    return correct / total if total > 0 else 0.0
 
 
 def train_validation(
@@ -153,9 +134,22 @@ def ssd(loaders: Dict[str, DataLoader], args: SSDInput):
     )
 
     model = load_model(dataset=args.dataset, checkpoint_path=args.model_path, device=device)
-    baseline_tr = compute_accuracy(model, train_retain_loader, device)
-    baseline_vr = compute_accuracy(model, valid_retain_loader, device)
-    print(f"Baseline retain acc - train: {baseline_tr:.4f}, valid: {baseline_vr:.4f}")
+    baseline_acc = train_validation(
+        model,
+        train_retain_loader,
+        train_forget_loader,
+        valid_retain_loader,
+        valid_forget_loader,
+        device,
+    )
+    print(
+        "Baseline retain acc - train: {:.4f}, valid: {:.4f}".format(
+            baseline_acc["tr_acc"], baseline_acc["vr_acc"]
+        )
+    )
+    if args.print_accuracies:
+        line = log_accuracies(args.results_path, "baseline", baseline_acc)
+        print(f"   {line}")
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
     pdr = ssd_file.ParameterPerturber(model, optimizer, device, parameters)
 
@@ -175,6 +169,10 @@ def ssd(loaders: Dict[str, DataLoader], args: SSDInput):
         device,
     )
 
+    if args.print_accuracies:
+        line = log_accuracies(args.results_path, "after_ssd", acc_dict)
+        print(f"   {line}")
+
     if args.check_path is not None:
         check_dir = os.path.dirname(args.check_path)
         if check_dir:
@@ -191,12 +189,21 @@ def _wrap_dataset(dataset: Dataset) -> Dataset:
 def _create_loaders(args: SSDInput):
     dataset = load_dataset(dataset_name=args.dataset, root=args.dataroot, train=True)
 
-    retain_set, forget_set = create_retain_forget_split(
-        dataset,
-        forget_fraction=args.forget_fraction,
-        seed=args.seed,
-        save_dir="./data/splits",
-    )
+    split_dir = "./data/splits"
+    forget_idx_path = os.path.join(split_dir, "forget_idx.npy")
+    retain_idx_path = os.path.join(split_dir, "retain_idx.npy")
+
+    if os.path.exists(forget_idx_path) and os.path.exists(retain_idx_path):
+        print("Loading retain/forget splits from disk...")
+        retain_set, forget_set = load_split(dataset, split_dir)
+    else:
+        print("Creating retain/forget splits...")
+        retain_set, forget_set = create_retain_forget_split(
+            dataset,
+            forget_fraction=args.forget_fraction,
+            seed=args.seed,
+            save_dir=split_dir,
+        )
 
     retain_len = len(retain_set)
     forget_len = len(forget_set)

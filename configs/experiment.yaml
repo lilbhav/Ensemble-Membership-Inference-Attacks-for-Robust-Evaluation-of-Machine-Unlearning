@@ -6,8 +6,8 @@ experiment:
 dataset:
   name: "cifar10"
   data_root: "./data"
-  forget_fraction: 0.1
-  retain_fraction: 0.9
+  forget_fraction: 0.2
+  retain_fraction: 0.8
   num_classes: 10
 
 model:
@@ -18,11 +18,11 @@ model:
 unlearning:
   method: "scrub"   # [fine_tune, grad_ascent, scrub, ssd]
   params:
-    epochs: 10
+    epochs: 20
     lr: 0.001
     weight_decay: 0.0001
-    temperature: 4.0
-    dampening_factor: 0.5
+    temperature: 6.0
+    dampening_factor: 1.0
 
 mia:
   attacks:

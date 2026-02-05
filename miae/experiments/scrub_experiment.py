@@ -13,7 +13,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 
 # Framework imports
 from data.loaders import load_dataset, get_num_classes
-from utils.splits import create_retain_forget_split
+from utils.splits import create_retain_forget_split, load_split
+from utils.metrics import compute_accuracy, log_accuracies
 from torch.utils.data import DataLoader, random_split
 import torchvision.models as models
 
@@ -106,7 +107,10 @@ def scrub(loaders, args):
 
     # Track metrics
     tf_accs, tr_accs, vf_accs, vr_accs = [], [], [], []
+    forget_phase_metrics = []
     losses, epoch_list = [], []
+
+    results_path = getattr(args, "results_path", None)
 
     # Training args
     t_opt = SimpleNamespace()
@@ -151,6 +155,16 @@ def scrub(loaders, args):
                 )
                 print(f"    Done: maximize_loss = {maximize_loss:.4f}")
                 sys.stdout.flush()
+                acc_dict = {
+                    'tr_acc': compute_accuracy(model_s, train_retain_loader, device),
+                    'tf_acc': compute_accuracy(model_s, train_forget_loader, device),
+                    'vr_acc': compute_accuracy(model_s, valid_retain_loader, device),
+                    'vf_acc': compute_accuracy(model_s, valid_forget_loader, device),
+                }
+                forget_phase_metrics.append(acc_dict)
+                if args.print_accuracies:
+                    line = log_accuracies(results_path, f"forget_step {f_epoch}", acc_dict)
+                    print(f"   {line}")
             except Exception as e:
                 print(f"    ERROR during maximize: {e}")
                 sys.stdout.flush()
@@ -190,38 +204,29 @@ def scrub(loaders, args):
         epoch_list.append(epoch)
 
         # Evaluation
-        acc_dict = None
-        if args.eval_every and (epoch % args.eval_every == 0):
-            model_s.eval()
-            model_t.eval()
+        model_s.eval()
+        model_t.eval()
 
-            acc_dict = {
-                'tr_acc': compute_accuracy(model_s, train_retain_loader, device),
-                'tf_acc': compute_accuracy(model_s, train_forget_loader, device),
-                'vr_acc': compute_accuracy(model_s, valid_retain_loader, device),
-                'vf_acc': compute_accuracy(model_s, valid_forget_loader, device),
-            }
+        acc_dict = {
+            'tr_acc': compute_accuracy(model_s, train_retain_loader, device),
+            'tf_acc': compute_accuracy(model_s, train_forget_loader, device),
+            'vr_acc': compute_accuracy(model_s, valid_retain_loader, device),
+            'vf_acc': compute_accuracy(model_s, valid_forget_loader, device),
+        }
 
-            tr_accs.append(acc_dict['tr_acc'])
-            tf_accs.append(acc_dict['tf_acc'])
-            vr_accs.append(acc_dict['vr_acc'])
-            vf_accs.append(acc_dict['vf_acc'])
-        else:
-            tr_accs.append(None)
-            tf_accs.append(None)
-            vr_accs.append(None)
-            vf_accs.append(None)
+        tr_accs.append(acc_dict['tr_acc'])
+        tf_accs.append(acc_dict['tf_acc'])
+        vr_accs.append(acc_dict['vr_acc'])
+        vf_accs.append(acc_dict['vf_acc'])
 
         print(
             f"Epoch {epoch}: minimize loss: {fmt_metric(train_loss, precision=8)}, "
             f"train_acc: {fmt_metric(train_acc, precision=6)}"
         )
 
-        if args.print_accuracies and acc_dict is not None:
-            print(f"   tr_acc: {acc_dict['tr_acc']:.4f}")
-            print(f"   tf_acc: {acc_dict['tf_acc']:.4f}")
-            print(f"   vr_acc: {acc_dict['vr_acc']:.4f}")
-            print(f"   vf_acc: {acc_dict['vf_acc']:.4f}")
+        if args.print_accuracies:
+            line = log_accuracies(results_path, f"retain_epoch {epoch}", acc_dict)
+            print(f"   {line}")
 
     # Save student model
     if hasattr(args, 'check_path') and args.check_path is not None:
@@ -234,26 +239,11 @@ def scrub(loaders, args):
         'tr_accs': tr_accs,
         'tf_accs': tf_accs,
         'vr_accs': vr_accs,
-        'vf_accs': vf_accs
+        'vf_accs': vf_accs,
+        'forget_phase_metrics': forget_phase_metrics,
     }
 
     return model_s, history
-
-
-def compute_accuracy(model, loader, device):
-    """Compute accuracy on a given loader."""
-    correct = 0
-    total = 0
-
-    with torch.no_grad():
-        for inputs, targets in loader:
-            inputs, targets = inputs.to(device), targets.to(device)
-            outputs = model(inputs)
-            _, predicted = torch.max(outputs.data, 1)
-            total += targets.size(0)
-            correct += (predicted == targets).sum().item()
-
-    return correct / total if total > 0 else 0.0
 
 
 def main():
@@ -283,13 +273,21 @@ def main():
     )
 
     # ========== 2. CREATE SPLITS ==========
-    print("Creating retain/forget splits...")
-    retain_set, forget_set = create_retain_forget_split(
-        dataset,
-        forget_fraction=args.forget_fraction,
-        seed=args.seed,
-        save_dir="./data/splits"
-    )
+    split_dir = "./data/splits"
+    forget_idx_path = os.path.join(split_dir, "forget_idx.npy")
+    retain_idx_path = os.path.join(split_dir, "retain_idx.npy")
+
+    if os.path.exists(forget_idx_path) and os.path.exists(retain_idx_path):
+        print("Loading retain/forget splits from disk...")
+        retain_set, forget_set = load_split(dataset, split_dir)
+    else:
+        print("Creating retain/forget splits...")
+        retain_set, forget_set = create_retain_forget_split(
+            dataset,
+            forget_fraction=args.forget_fraction,
+            seed=args.seed,
+            save_dir=split_dir,
+        )
 
     print(f"  Retain set size: {len(retain_set)}")
     print(f"  Forget set size: {len(forget_set)}")

@@ -1,21 +1,22 @@
 # Retain-optimized SCRUB config
 
-epochs: 15
+epochs: 20
 learning_rate: 0.001
 batch_size: 256
 weight_decay: 0.0001
 
-kd_T: 4.0
-msteps: 1
-t_opt_gamma: 0.5
-t_opt_alpha: 0.5
+kd_T: 6.0
+msteps: 5
+t_opt_gamma: 1.0
+t_opt_alpha: 1.0
 
 dataset: cifar10
 dataroot: ./data/raw
-forget_fraction: 0.1
+forget_fraction: 0.2
 seed: 42
 
-check_path: ./results/scrub_unlearned_model.pt
+check_path: ./results/scrub_unlearned_model/scrub_unlearned_model.pt
+results_path: ./results/scrub_unlearned_model/results.txt
 print_accuracies: true
 
 eval_every: 1
