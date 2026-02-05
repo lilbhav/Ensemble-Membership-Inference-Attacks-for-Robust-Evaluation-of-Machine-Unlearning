@@ -20,7 +20,10 @@ import pdb
 import math
 import shutil
 from torch.utils.data import DataLoader
-import wandb
+try:
+    import wandb
+except Exception:
+    wandb = None
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 import seaborn as sns
