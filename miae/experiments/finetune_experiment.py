@@ -167,7 +167,7 @@ def ft_iter(data_loaders: Dict[str, DataLoader], model: nn.Module, args: FineTun
         losses.update(loss.item(), image.size(0))
         top1.update(prec1.item(), image.size(0))
 
-        if (i + 1) % args.print_freq == 0:
+        if args.print_freq > 0 and (i + 1) % args.print_freq == 0:
             end = time.time()
             print(
                 f"Epoch: [{epoch}][{i}/{len(train_loader)}]\t"
