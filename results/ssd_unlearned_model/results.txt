@@ -1,0 +1,9 @@
+Loading dataset and creating splits...
+Files already downloaded and verified
+Running SSD unlearning...
+Baseline retain acc - train: 1.0000, valid: 1.0000
+{'lower_bound': 1, 'exponent': 1, 'magnitude_diff': None, 'min_layer': -1, 'max_layer': -1, 'forget_threshold': 1, 'dampening_constant': 1.0, 'selection_weighting': 10.0}
+   tr_acc: 1.0000
+   tf_acc: 1.0000
+   vr_acc: 1.0000
+   vf_acc: 1.0000

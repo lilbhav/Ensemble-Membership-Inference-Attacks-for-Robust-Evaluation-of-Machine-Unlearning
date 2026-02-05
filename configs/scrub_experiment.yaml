@@ -1,14 +1,14 @@
 # Retain-optimized SCRUB config
 
 epochs: 15
-learning_rate: 0.005
+learning_rate: 0.001
 batch_size: 256
 weight_decay: 0.0001
 
-kd_T: 8.0
-msteps: 4
-t_opt_gamma: 0.7
-t_opt_alpha: 1.0
+kd_T: 4.0
+msteps: 1
+t_opt_gamma: 0.5
+t_opt_alpha: 0.5
 
 dataset: cifar10
 dataroot: ./data/raw

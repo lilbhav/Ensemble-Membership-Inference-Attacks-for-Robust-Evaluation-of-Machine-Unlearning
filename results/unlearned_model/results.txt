@@ -1,7 +1,5 @@
 Loading dataset...
-Downloading https://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz to ./data/raw/cifar-10-python.tar.gz
-100% 170498071/170498071 [00:05<00:00, 28635219.63it/s]
-Extracting ./data/raw/cifar-10-python.tar.gz to ./data/raw
+Files already downloaded and verified
 Creating retain/forget splits...
   Retain set size: 45000
   Forget set size: 5000
@@ -11,42 +9,46 @@ Creating data loaders...
 Data loaders created. Training will start now...
 Configuration: epochs=5, batch_size=32, device=cuda
 Running fine-tuning unlearning...
+/usr/local/lib/python3.12/dist-packages/torchvision/models/_utils.py:208: UserWarning: The parameter 'pretrained' is deprecated since 0.13 and may be removed in the future, please use 'weights' instead.
+  warnings.warn(
+/usr/local/lib/python3.12/dist-packages/torchvision/models/_utils.py:223: UserWarning: Arguments other than a weight enum or `None` for 'weights' are deprecated since 0.13 and may be removed in the future. The current behavior is equivalent to passing `weights=None`.
+  warnings.warn(msg)
 
 [Fine-tune 1/5] Starting epoch...
-train_accuracy 47.343
-   tr_acc: 0.5076
-   tf_acc: 0.5062
-   vr_acc: 0.4993
-   vf_acc: 0.4680
+train_accuracy 98.314
+   tr_acc: 0.9972
+   tf_acc: 0.9944
+   vr_acc: 0.9951
+   vf_acc: 0.9900
 
 [Fine-tune 2/5] Starting epoch...
-train_accuracy 50.862
-   tr_acc: 0.5507
-   tf_acc: 0.5420
-   vr_acc: 0.5362
-   vf_acc: 0.4960
+train_accuracy 98.326
+   tr_acc: 0.9984
+   tf_acc: 0.9916
+   vr_acc: 0.9929
+   vf_acc: 0.9960
 
 [Fine-tune 3/5] Starting epoch...
-train_accuracy 54.751
-   tr_acc: 0.5887
-   tf_acc: 0.5600
-   vr_acc: 0.5600
-   vf_acc: 0.5160
+train_accuracy 98.793
+   tr_acc: 0.9983
+   tf_acc: 0.9893
+   vr_acc: 0.9880
+   vf_acc: 0.9860
 
 [Fine-tune 4/5] Starting epoch...
-train_accuracy 57.817
-   tr_acc: 0.6316
-   tf_acc: 0.5867
-   vr_acc: 0.5847
-   vf_acc: 0.5620
+train_accuracy 98.812
+   tr_acc: 0.9988
+   tf_acc: 0.9876
+   vr_acc: 0.9847
+   vf_acc: 0.9840
 
 [Fine-tune 5/5] Starting epoch...
-train_accuracy 61.538
-   tr_acc: 0.6734
-   tf_acc: 0.6056
-   vr_acc: 0.6029
-   vf_acc: 0.5880
+train_accuracy 98.879
+   tr_acc: 0.9988
+   tf_acc: 0.9809
+   vr_acc: 0.9764
+   vf_acc: 0.9760
 
 Fine-tuning unlearning completed!
-Final train retain acc: 0.6734
-Final valid forget acc: 0.5880
+Final train retain acc: 0.9988
+Final valid forget acc: 0.9760
