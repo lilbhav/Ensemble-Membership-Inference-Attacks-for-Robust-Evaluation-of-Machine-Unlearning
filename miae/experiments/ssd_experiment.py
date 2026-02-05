@@ -153,6 +153,9 @@ def ssd(loaders: Dict[str, DataLoader], args: SSDInput):
     )
 
     model = load_model(dataset=args.dataset, checkpoint_path=args.model_path, device=device)
+    baseline_tr = compute_accuracy(model, train_retain_loader, device)
+    baseline_vr = compute_accuracy(model, valid_retain_loader, device)
+    print(f"Baseline retain acc - train: {baseline_tr:.4f}, valid: {baseline_vr:.4f}")
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
     pdr = ssd_file.ParameterPerturber(model, optimizer, device, parameters)
 

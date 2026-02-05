@@ -152,8 +152,8 @@ def train_resnet18_cifar10(
 
 if __name__ == "__main__":
     model = train_resnet18_cifar10(
-        num_epochs=2,          # Reduced for faster CPU training
-        batch_size=64,         # Reduced batch size
+        num_epochs=25,
+        batch_size=256,
         learning_rate=0.1,
         output_checkpoint="./models/pretrained_cifar10.pt"
     )
