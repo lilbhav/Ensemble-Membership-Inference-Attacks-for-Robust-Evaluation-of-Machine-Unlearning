@@ -1,12 +1,12 @@
 # Retain-optimized SCRUB config
 
 epochs: 20
-learning_rate: 0.001
-batch_size: 256
-weight_decay: 0.0001
+learning_rate: 0.0005
+batch_size: 128
+weight_decay: 0.0005
 
 kd_T: 6.0
-msteps: 5
+msteps: 1
 t_opt_gamma: 1.0
 t_opt_alpha: 1.0
 

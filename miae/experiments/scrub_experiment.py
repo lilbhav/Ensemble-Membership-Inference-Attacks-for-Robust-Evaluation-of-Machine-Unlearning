@@ -62,6 +62,25 @@ def scrub(loaders, args):
     valid_forget_loader = loaders['valid_forget_loader']
     valid_retain_loader = loaders['valid_retain_loader']
 
+    # Baseline evaluation (pre-unlearning)
+    try:
+        model.eval()
+        base_acc = {
+            'tr_acc': compute_accuracy(model, train_retain_loader, device),
+            'tf_acc': compute_accuracy(model, train_forget_loader, device),
+            'vr_acc': compute_accuracy(model, valid_retain_loader, device),
+            'vf_acc': compute_accuracy(model, valid_forget_loader, device),
+        }
+        print(
+            "Baseline - tr_acc: {tr:.4f}, tf_acc: {tf:.4f}, vr_acc: {vr:.4f}, vf_acc: {vf:.4f}".format(
+                tr=base_acc['tr_acc'], tf=base_acc['tf_acc'], vr=base_acc['vr_acc'], vf=base_acc['vf_acc']
+            )
+        )
+        if args.print_accuracies:
+            _ = log_accuracies(results_path, "baseline", base_acc)
+    except Exception as e:
+        print(f"Warning: baseline evaluation failed: {e}")
+
     # Hyperparameters
     kd_T = args.kd_T
     learning_rate = args.learning_rate
@@ -165,6 +184,15 @@ def scrub(loaders, args):
                 if args.print_accuracies:
                     line = log_accuracies(results_path, f"forget_step {f_epoch}", acc_dict)
                     print(f"   {line}")
+                # Safety check: abort forget-phase if maximize_loss magnitude explodes
+                try:
+                    if abs(float(maximize_loss)) > 1e6:
+                        print(
+                            f"    WARNING: maximize_loss magnitude too large ({maximize_loss}); stopping forget-phase early to avoid collapse."
+                        )
+                        break
+                except Exception:
+                    pass
             except Exception as e:
                 print(f"    ERROR during maximize: {e}")
                 sys.stdout.flush()

@@ -1,50 +1,59 @@
 Loading dataset...
 Files already downloaded and verified
-Creating retain/forget splits...
-  Retain set size: 45000
-  Forget set size: 5000
-  Retain train: 40500, Retain val: 4500
-  Forget train: 4500, Forget val: 500
+Loading retain/forget splits from disk...
+  Retain set size: 40000
+  Forget set size: 10000
+  Retain train: 36000, Retain val: 4000
+  Forget train: 9000, Forget val: 1000
 Creating data loaders...
 Data loaders created. Training will start now...
-Configuration: epochs=5, batch_size=32, device=cuda
+Configuration: epochs=10, batch_size=32, device=cuda
 Running fine-tuning unlearning...
+/usr/local/lib/python3.12/dist-packages/torchvision/models/_utils.py:208: UserWarning: The parameter 'pretrained' is deprecated since 0.13 and may be removed in the future, please use 'weights' instead.
+  warnings.warn(
+/usr/local/lib/python3.12/dist-packages/torchvision/models/_utils.py:223: UserWarning: Arguments other than a weight enum or `None` for 'weights' are deprecated since 0.13 and may be removed in the future. The current behavior is equivalent to passing `weights=None`.
+  warnings.warn(msg)
 
-[Fine-tune 1/5] Starting epoch...
-train_accuracy 98.314
-   tr_acc: 0.9972
-   tf_acc: 0.9944
-   vr_acc: 0.9951
-   vf_acc: 0.9900
+[Fine-tune 1/10] Starting epoch...
+train_accuracy 61.506
+   epoch 1 | tr_acc: 0.6615 tf_acc: 0.6512 vr_acc: 0.6268 vf_acc: 0.6450
 
-[Fine-tune 2/5] Starting epoch...
-train_accuracy 98.326
-   tr_acc: 0.9984
-   tf_acc: 0.9916
-   vr_acc: 0.9929
-   vf_acc: 0.9960
+[Fine-tune 2/10] Starting epoch...
+train_accuracy 64.517
+   epoch 2 | tr_acc: 0.6839 tf_acc: 0.6556 vr_acc: 0.6298 vf_acc: 0.6530
 
-[Fine-tune 3/5] Starting epoch...
-train_accuracy 98.793
-   tr_acc: 0.9983
-   tf_acc: 0.9893
-   vr_acc: 0.9880
-   vf_acc: 0.9860
+[Fine-tune 3/10] Starting epoch...
+train_accuracy 67.000
+   epoch 3 | tr_acc: 0.7187 tf_acc: 0.6759 vr_acc: 0.6530 vf_acc: 0.6790
 
-[Fine-tune 4/5] Starting epoch...
-train_accuracy 98.812
-   tr_acc: 0.9988
-   tf_acc: 0.9876
-   vr_acc: 0.9847
-   vf_acc: 0.9840
+[Fine-tune 4/10] Starting epoch...
+train_accuracy 69.289
+   epoch 4 | tr_acc: 0.7480 tf_acc: 0.6829 vr_acc: 0.6693 vf_acc: 0.6910
 
-[Fine-tune 5/5] Starting epoch...
-train_accuracy 98.879
-   tr_acc: 0.9988
-   tf_acc: 0.9809
-   vr_acc: 0.9764
-   vf_acc: 0.9760
+[Fine-tune 5/10] Starting epoch...
+train_accuracy 71.892
+   epoch 5 | tr_acc: 0.7827 tf_acc: 0.6924 vr_acc: 0.6803 vf_acc: 0.6890
+
+[Fine-tune 6/10] Starting epoch...
+train_accuracy 74.700
+   epoch 6 | tr_acc: 0.8188 tf_acc: 0.7010 vr_acc: 0.6753 vf_acc: 0.6900
+
+[Fine-tune 7/10] Starting epoch...
+train_accuracy 78.383
+   epoch 7 | tr_acc: 0.8672 tf_acc: 0.7072 vr_acc: 0.6883 vf_acc: 0.6910
+
+[Fine-tune 8/10] Starting epoch...
+train_accuracy 82.731
+   epoch 8 | tr_acc: 0.9058 tf_acc: 0.6984 vr_acc: 0.6913 vf_acc: 0.7030
+
+[Fine-tune 9/10] Starting epoch...
+train_accuracy 86.925
+   epoch 9 | tr_acc: 0.9471 tf_acc: 0.7038 vr_acc: 0.6833 vf_acc: 0.7160
+
+[Fine-tune 10/10] Starting epoch...
+train_accuracy 90.275
+   epoch 10 | tr_acc: 0.9703 tf_acc: 0.7040 vr_acc: 0.6935 vf_acc: 0.7160
 
 Fine-tuning unlearning completed!
-Final train retain acc: 0.9988
-Final valid forget acc: 0.9760
+Final train retain acc: 0.9703
+Final valid forget acc: 0.7160
