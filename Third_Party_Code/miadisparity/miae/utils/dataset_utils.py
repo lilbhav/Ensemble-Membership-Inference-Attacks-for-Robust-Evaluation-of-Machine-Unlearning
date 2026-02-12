@@ -2,6 +2,7 @@ import torch
 import numpy as np
 from torch.utils.data import Dataset
 from typing import Tuple
+import itertools
 
 
 class CanarySet(Dataset):
@@ -87,7 +88,7 @@ def dataset_split(dataset, lengths: list, shuffle_seed=1):
     indices = list(range(sum(lengths)))
     np.random.shuffle(indices)
     return [torch.utils.data.Subset(dataset, indices[offset - length:offset]) for offset, length in
-            zip(torch._utils._accumulate(lengths), lengths)]
+            zip(itertools.accumulate(lengths), lengths)]
 
 
 def add_canaries(dataset, num_canaries, num_classes, shuffle_seed=1):
