@@ -13,12 +13,10 @@ Usage:
 import os
 import sys
 import yaml
-import json
 import logging
 import argparse
 import torch
 import numpy as np
-from pathlib import Path
 from typing import Dict, Any, Optional, List
 from torch.utils.data import DataLoader
 
@@ -28,7 +26,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from miae.mia_runner import MIARunner, MIARunnerConfig, AttackConfig
 from miae.attack_integrations import AttackFactory
 from data.loaders import load_dataset, get_num_classes
-from utils.splits import create_retain_forget_split
+from utils.splits import create_retain_forget_split, load_split
 
 
 def load_config(config_path: str) -> Dict[str, Any]:
@@ -66,34 +64,21 @@ def setup_logging(log_dir: str, experiment_name: str) -> logging.Logger:
     return logger
 
 
-def load_model(config: Dict[str, Any], device: str) -> torch.nn.Module:
-    """Load or create model based on config."""
-    logger = logging.getLogger(__name__)
+def create_model(architecture: str, dataset_name: str, device: str) -> torch.nn.Module:
+    """Create a fresh model with given architecture and number of classes."""
+    import torchvision.models as models
     
-    model_cfg = config['model']
-    checkpoint_path = model_cfg.get('checkpoint_path')
+    num_classes = get_num_classes(dataset_name)
     
-    if checkpoint_path and os.path.exists(checkpoint_path):
-        logger.info(f"Loading model from {checkpoint_path}")
-        model = torch.load(checkpoint_path, map_location=device)
+    if architecture == 'resnet18':
+        model = models.resnet18(pretrained=False)
+        model.conv1 = torch.nn.Conv2d(
+            3, 64, kernel_size=3, stride=1, padding=1, bias=False
+        )
+        model.maxpool = torch.nn.Identity()
+        model.fc = torch.nn.Linear(model.fc.in_features, num_classes)
     else:
-        logger.warning(f"Model checkpoint not found at {checkpoint_path}")
-        logger.warning("Using random model initialization for demonstration")
-        
-        import torchvision.models as models
-        
-        arch = model_cfg.get('architecture', 'resnet18')
-        num_classes = get_num_classes(config['dataset']['name'])
-        
-        if arch == 'resnet18':
-            model = models.resnet18(pretrained=False)
-            model.conv1 = torch.nn.Conv2d(
-                3, 64, kernel_size=3, stride=1, padding=1, bias=False
-            )
-            model.maxpool = torch.nn.Identity()
-            model.fc = torch.nn.Linear(model.fc.in_features, num_classes)
-        else:
-            raise ValueError(f"Unsupported architecture: {arch}")
+        raise ValueError(f"Unsupported architecture: {architecture}")
     
     return model.to(device).eval()
 
@@ -118,7 +103,18 @@ def load_unlearned_model(config: Dict[str, Any], device: str) -> Optional[torch.
     for path in possible_paths:
         if path and os.path.exists(path):
             logger.info(f"Loading unlearned model from {path}")
-            return torch.load(path, map_location=device).to(device).eval()
+            checkpoint = torch.load(path, map_location=device)
+            
+            # Check if it's a state_dict (from SCRUB) or a full model
+            if isinstance(checkpoint, dict) and not hasattr(checkpoint, 'to'):
+                # It's a state_dict, need to create model first
+                logger.info("Checkpoint is a state_dict; creating model and loading weights...")
+                model = create_model(model_arch, dataset_name, device)
+                model.load_state_dict(checkpoint)
+                return model.eval()
+            else:
+                # It's a full model object
+                return checkpoint.to(device).eval()
     
     logger.warning(f"No pre-unlearned model found for {method}")
     logger.warning("You must provide an unlearned model or train one first")
@@ -140,24 +136,34 @@ def prepare_data(config: Dict[str, Any]) -> tuple:
     train_data = load_dataset(dataset_name, train=True)
     test_data = load_dataset(dataset_name, train=False)
     
-    # Create split
-    forget_indices, retain_indices = create_retain_forget_split(
-        train_data,
-        forget_fraction=forget_fraction,
-        seed=config.get('seed', 42)
-    )
+    # Try to load existing splits first (from SCRUB unlearning)
+    split_dir = "./data/splits"
+    if os.path.exists(os.path.join(split_dir, "forget_idx.npy")) and os.path.exists(os.path.join(split_dir, "retain_idx.npy")):
+        logger.info("Loading existing retain/forget splits from disk...")
+        retain_data, forget_data = load_split(train_data, split_dir)
+    else:
+        # Create new split if doesn't exist
+        logger.info("Creating retain/forget splits...")
+        member_data, forget_data = create_retain_forget_split(
+            train_data,
+            forget_fraction=forget_fraction,
+            seed=config.get('seed', 42),
+            save_dir=split_dir
+        )
+        retain_data = member_data
     
     logger.info(f"Dataset: {dataset_name}")
     logger.info(f"  Training samples: {len(train_data)}")
     logger.info(f"  Test samples: {len(test_data)}")
-    logger.info(f"  Forget set: {len(forget_indices)} ({forget_fraction*100:.0f}%)")
-    logger.info(f"  Retain set: {len(retain_indices)} ({(1-forget_fraction)*100:.0f}%)")
+    logger.info(f"  Forget set: {len(forget_data)} ({forget_fraction*100:.0f}%)")
+    logger.info(f"  Retain set (members): {len(retain_data)} ({(1-forget_fraction)*100:.0f}%)")
     
-    # For MIA: members (training data) and non-members (test data)
-    member_loader = DataLoader(train_data, batch_size=batch_size, shuffle=False)
+    # For MIA: members are RETAIN set (what SCRUB kept), non-members are TEST set
+    member_loader = DataLoader(retain_data, batch_size=batch_size, shuffle=False)
     nonmember_loader = DataLoader(test_data, batch_size=batch_size, shuffle=False)
     
-    return member_loader, nonmember_loader, train_data, test_data
+    # Return: member_loader, nonmember_loader, member_data (retain set), test_data (non-members)
+    return member_loader, nonmember_loader, retain_data, test_data
 
 
 def create_attack_configs(config: Dict[str, Any], 
@@ -199,7 +205,6 @@ def create_attack_configs(config: Dict[str, Any],
 def run_mia_experiment(config_path: str,
                       output_dir: Optional[str] = None,
                       attacks: Optional[List[str]] = None,
-                      model: Optional[torch.nn.Module] = None,
                       unlearned_model: Optional[torch.nn.Module] = None):
     """
     Run complete MIA experiment from config.
@@ -208,7 +213,6 @@ def run_mia_experiment(config_path: str,
         config_path: Path to YAML config file
         output_dir: Optional override for output directory
         attacks: Optional list of attack names to override config
-        model: Optional pre-loaded original model
         unlearned_model: Optional pre-loaded unlearned model
     
     Returns:
@@ -232,16 +236,14 @@ def run_mia_experiment(config_path: str,
     logger.info(f"Device: {device}")
     
     # Prepare data
-    member_loader, nonmember_loader, train_data, test_data = prepare_data(config)
+    member_loader, nonmember_loader, member_data, test_data = prepare_data(config)
     
-    # Load models if not provided
-    if model is None:
-        model = load_model(config, device)
+    # Load unlearned model if not provided
     if unlearned_model is None:
         unlearned_model = load_unlearned_model(config, device)
         if unlearned_model is None:
-            logger.warning("Using original model as unlearned model")
-            unlearned_model = model
+            logger.error("Failed to load unlearned model. Exiting.")
+            return None
     
     # Create attack configs
     attack_configs = create_attack_configs(config, override_attacks=attacks)
@@ -295,12 +297,18 @@ def run_mia_experiment(config_path: str,
     logger.info("EVALUATION")
     logger.info("="*80)
     
-    num_train = len(train_data)
-    num_test = len(test_data)
+    num_members = len(member_data)      # RETAIN set size (what SCRUB trained on)
+    num_nonmembers = len(test_data)     # TEST set size (unseen by SCRUB)
+    
+    # Ground truth: 1 for members, 0 for non-members
+    # Order must match AttackResult.all_predictions: [member_preds | nonmember_preds]
     ground_truth = np.concatenate([
-        np.ones(num_train),
-        np.zeros(num_test)
+        np.ones(num_members),
+        np.zeros(num_nonmembers)
     ])
+    
+    logger.info(f"Ground truth: {num_members} members, {num_nonmembers} non-members")
+    logger.info(f"Total samples in ground truth: {len(ground_truth)}")
     
     metrics = runner.evaluate_attacks(ground_truth)
     
