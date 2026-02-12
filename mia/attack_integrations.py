@@ -19,15 +19,15 @@ from torch.utils.data import DataLoader, Dataset, TensorDataset
 # Add reference code to path for direct imports
 _REF_CODE_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    'Third_Party_Code/mia-disparity'
+    'Third_Party_Code/miadisparity'
 )
 if _REF_CODE_PATH not in sys.path:
     sys.path.insert(0, _REF_CODE_PATH)
 
 # Try to import reference implementations
 try:
-    from miae.attacks.aug_mia import AugAttack, AugAuxiliaryInfo, AugModelAccess
-    from miae.attacks.base import ModelAccessType
+    from Third_Party_Code.miadisparity.miae.attacks.aug_mia import AugAttack, AugAuxiliaryInfo, AugModelAccess
+    from Third_Party_Code.miadisparity.miae.attacks.base import ModelAccessType
     HAS_REFERENCE_AUGMENTATION = True
 except ImportError:
     HAS_REFERENCE_AUGMENTATION = False
