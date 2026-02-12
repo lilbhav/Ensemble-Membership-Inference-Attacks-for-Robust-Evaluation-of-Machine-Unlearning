@@ -43,6 +43,11 @@ mia:
       params:
         num_shadow_models: 29
 
+    - name: "augmentation"
+      params:
+        batch_size: 64
+        num_augmentations: 10
+
 output:
   save_dir: "./results/mia_disparity"
   log_dir: "./logs"
