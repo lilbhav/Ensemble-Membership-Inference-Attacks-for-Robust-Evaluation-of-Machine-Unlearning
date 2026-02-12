@@ -136,8 +136,9 @@ def prepare_data(config: Dict[str, Any]) -> tuple:
     forget_fraction = dataset_cfg.get('forget_fraction', 0.2)
     batch_size = config.get('batch_size', 64)
     
-    # Load dataset
-    train_data, test_data = load_dataset(dataset_name)
+    # Load dataset - load_dataset() returns single dataset, not tuple
+    train_data = load_dataset(dataset_name, train=True)
+    test_data = load_dataset(dataset_name, train=False)
     
     # Create split
     forget_indices, retain_indices = create_retain_forget_split(
