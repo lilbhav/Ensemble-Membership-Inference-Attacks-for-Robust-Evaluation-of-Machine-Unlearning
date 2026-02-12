@@ -23,8 +23,8 @@ from torch.utils.data import DataLoader
 # Add paths
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from miae.mia_runner import MIARunner, MIARunnerConfig, AttackConfig
-from miae.attack_integrations import AttackFactory
+from mia.mia_runner import MIARunner, MIARunnerConfig, AttackConfig
+from mia.attack_integrations import AttackFactory
 from data.loaders import load_dataset, get_num_classes
 from utils.splits import create_retain_forget_split, load_split
 
