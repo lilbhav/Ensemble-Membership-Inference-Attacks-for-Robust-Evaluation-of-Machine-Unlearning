@@ -8,6 +8,8 @@ with our unified MIARunner framework.
 import os
 import sys
 import logging
+import copy
+import tempfile
 from typing import Dict, Optional, Tuple, Any
 from pathlib import Path
 
@@ -456,7 +458,11 @@ class ReferenceAttackWrapper:
             num_test = len(test_dataloader.dataset)
             member_scores = np.random.uniform(0.5, 1.0, num_train)
             nonmember_scores = np.random.uniform(0.0, 0.5, num_test)
-            return member_scores, nonmember_scores, np.concatenate([np.ones(num_train), np.zeros(num_test)])
+            all_predictions = np.concatenate([
+                (member_scores > 0.5).astype(int),
+                (nonmember_scores > 0.5).astype(int)
+            ])
+            return member_scores, nonmember_scores, all_predictions
 
 
     def _get_confidence_scores(
