@@ -420,14 +420,31 @@ class MIARunner:
 
         # Save configuration
         config_path = os.path.join(self.config.output_dir, "config.json")
+        
+        # Helper function to make objects JSON-serializable
+        def make_serializable(obj):
+            if isinstance(obj, dict):
+                return {k: make_serializable(v) for k, v in obj.items()}
+            elif isinstance(obj, (list, tuple)):
+                return [make_serializable(item) for item in obj]
+            elif hasattr(obj, '__dict__'):  # Convert dataclass/object to dict recursively
+                return make_serializable(vars(obj))
+            else:
+                # Convert non-serializable types to string
+                return str(obj)
+        
         config_dict = {
             "dataset": self.config.dataset_name,
             "model": self.config.model_architecture,
             "unlearning_method": self.config.unlearning_method,
             "attacks": [asdict(a) for a in self.config.attacks],
-            "device": str(self.config.device),  # Convert torch.device to string
+            "device": str(self.config.device),
             "seed": self.config.seed,
         }
+        
+        # Make config dict fully JSON-serializable
+        config_dict = make_serializable(config_dict)
+        
         with open(config_path, "w") as f:
             json.dump(config_dict, f, indent=2)
 

@@ -17,6 +17,7 @@ model:
 
 unlearning:
   method: "scrub"   # [fine_tune, grad_ascent, scrub, ssd]
+  checkpoint_path: "/content/gdrive/My Drive/mia_checkpoints/scrub_unlearned_model.pt"
   params:
     epochs: 20
     lr: 0.001
