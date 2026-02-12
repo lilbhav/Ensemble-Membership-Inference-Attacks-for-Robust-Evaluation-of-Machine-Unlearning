@@ -133,9 +133,6 @@ class ReferenceAttackWrapper:
         Returns:
             Tuple of (member_scores, nonmember_scores, all_predictions)
         """
-        if not HAS_REFERENCE_ATTACKS:
-            raise RuntimeError("Reference attacks not available")
-
         self.logger.info("Running Yeom attack...")
 
         target_model.to(device)
