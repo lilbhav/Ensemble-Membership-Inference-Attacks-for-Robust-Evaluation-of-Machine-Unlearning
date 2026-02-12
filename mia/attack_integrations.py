@@ -630,4 +630,4 @@ if __name__ == "__main__":
     print(f"Attack factory ready for:")
     print(f"  - Basic: yeom, shokri, lira, reference")
     print(f"  - Advanced: losstraj, calibration, augmentation")
-    print(f"Reference attacks available: {HAS_REFERENCE_ATTACKS}")
+    print(f"Reference augmentation available: {HAS_REFERENCE_AUGMENTATION}")
