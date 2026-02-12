@@ -8,3 +8,6 @@ __pycache__/
 *.pyc
 logs/*.p
 data/splits/*.npy
+# Markdown files (except README)
+*.md
+!README.md
