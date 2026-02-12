@@ -425,7 +425,7 @@ class MIARunner:
             "model": self.config.model_architecture,
             "unlearning_method": self.config.unlearning_method,
             "attacks": [asdict(a) for a in self.config.attacks],
-            "device": self.config.device,
+            "device": str(self.config.device),  # Convert torch.device to string
             "seed": self.config.seed,
         }
         with open(config_path, "w") as f:
