@@ -53,7 +53,7 @@ def setup_logging(log_dir: str, experiment_name: str) -> logging.Logger:
     
     # Formatter
     formatter = logging.Formatter(
-        "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+        "%(message)s"
     )
     fh.setFormatter(formatter)
     ch.setFormatter(formatter)

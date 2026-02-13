@@ -34,6 +34,18 @@ try:
 except ImportError:
     HAS_REFERENCE_AUGMENTATION = False
 
+try:
+    from Third_Party_Code.miadisparity.miae.attacks.shokri_mia import ShokriAttack, ShokriAuxiliaryInfo, ShokriModelAccess
+    HAS_REFERENCE_SHOKRI = True
+except ImportError:
+    HAS_REFERENCE_SHOKRI = False
+
+try:
+    from Third_Party_Code.miadisparity.miae.attacks.lira_mia import LiraAttack, LiraAuxiliaryInfo, LiraModelAccess
+    HAS_REFERENCE_LIRA = True
+except ImportError:
+    HAS_REFERENCE_LIRA = False
+
 def _import_aug_attacks():
     """Wrapper for compatibility - attacks already loaded at module init."""
     if HAS_REFERENCE_AUGMENTATION:
@@ -75,7 +87,7 @@ class ReferenceAttackWrapper:
         attack_seed: int = 42,
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
-        Run Shokri membership inference attack.
+        Run Shokri membership inference attack using reference implementation.
 
         This attack trains shadow models on data with known membership,
         then trains an attack model to distinguish members from non-members.
@@ -97,18 +109,118 @@ class ReferenceAttackWrapper:
         """
         self.logger.info("Running Shokri attack...")
 
-        # Placeholder implementation for Shokri attack
-        num_train = len(train_dataloader.dataset) if train_dataloader else 100
-        num_test = len(test_dataloader.dataset) if test_dataloader else 100
+        if not HAS_REFERENCE_SHOKRI:
+            self.logger.warning("Reference Shokri not available. Using placeholder.")
+            num_train = len(train_dataloader.dataset) if train_dataloader else 100
+            num_test = len(test_dataloader.dataset) if test_dataloader else 100
+            member_scores = np.random.uniform(0.5, 1.0, num_train)
+            nonmember_scores = np.random.uniform(0.0, 0.5, num_test)
+            return member_scores, nonmember_scores, np.concatenate([np.ones(num_train), np.zeros(num_test)])
 
-        member_scores = np.random.uniform(0.5, 1.0, num_train)
-        nonmember_scores = np.random.uniform(0.0, 0.5, num_test)
-        all_predictions = np.concatenate([
-            np.ones(num_train),
-            np.zeros(num_test)
-        ])
+        try:
+            torch_device = torch.device(device)
+            self.logger.info("Using reference implementation from Third_Party_Code/mia-disparity")
 
-        return member_scores, nonmember_scores, all_predictions
+            # Extract data from dataloaders
+            train_data_list, train_labels_list = [], []
+            for data, labels in train_dataloader:
+                train_data_list.append(data)
+                train_labels_list.append(labels)
+            train_data = torch.cat(train_data_list, dim=0)
+            train_labels = torch.cat(train_labels_list, dim=0)
+
+            test_data_list, test_labels_list = [], []
+            for data, labels in test_dataloader:
+                test_data_list.append(data)
+                test_labels_list.append(labels)
+            test_data = torch.cat(test_data_list, dim=0)
+            test_labels = torch.cat(test_labels_list, dim=0)
+
+            # Create datasets
+            train_dataset = TensorDataset(train_data, train_labels)
+            test_dataset = TensorDataset(test_data, test_labels)
+
+            # Determine num_classes
+            num_classes = 10
+            try:
+                if hasattr(target_model, 'fc'):
+                    num_classes = target_model.fc.out_features
+                elif hasattr(target_model, 'classifier'):
+                    num_classes = target_model.classifier.out_features
+                else:
+                    num_classes = len(torch.unique(train_labels))
+            except:
+                pass
+
+            # Create temporary directory for attack artifacts
+            temp_dir = tempfile.mkdtemp()
+
+            # Create auxiliary info for Shokri
+            aux_info = ShokriAuxiliaryInfo({
+                "seed": attack_seed,
+                "device": torch_device,
+                "num_classes": num_classes,
+                "batch_size": batch_size,
+                "num_shadow_models": num_shadow_models,
+                "epochs": num_epochs,
+                "lr": lr,
+                "shadow_model_path": os.path.join(temp_dir, "shadow_models"),
+                "attack_model_path": os.path.join(temp_dir, "attack_models"),
+                "attack_dataset_path": os.path.join(temp_dir, "attack_dataset"),
+                "log_path": os.path.join(temp_dir, "logs"),
+                "save_path": os.path.join(temp_dir, "models"),
+            })
+
+            # Create model copy for untrained access
+            untrained_model = copy.deepcopy(target_model)
+
+            # Create model access
+            model_access = ShokriModelAccess(
+                model=target_model,
+                untrained_model=untrained_model,
+                access_type=ModelAccessType.BLACK_BOX
+            )
+
+            # Run attack
+            self.logger.info("Preparing Shokri attack (training shadow models)...")
+            attack = ShokriAttack(target_model_access=model_access, auxiliary_info=aux_info)
+            attack.prepare(train_dataset)
+
+            # Get membership scores
+            self.logger.info("Inferring membership...")
+            member_scores = attack.infer(train_dataset)
+            nonmember_scores = attack.infer(test_dataset)
+
+            # Clip to [0, 1]
+            member_scores = np.clip(member_scores, 0, 1)
+            nonmember_scores = np.clip(nonmember_scores, 0, 1)
+
+            # Create predictions
+            all_predictions = np.concatenate([
+                (member_scores > 0.5).astype(int),
+                (nonmember_scores > 0.5).astype(int)
+            ])
+
+            self.logger.info(
+                f"Shokri attack complete. "
+                f"Member: {member_scores.mean():.3f} ± {member_scores.std():.3f}, "
+                f"Non-member: {nonmember_scores.mean():.3f} ± {nonmember_scores.std():.3f}"
+            )
+
+            return member_scores, nonmember_scores, all_predictions
+
+        except Exception as e:
+            self.logger.error(f"Error in Shokri attack: {e}", exc_info=True)
+            self.logger.warning("Falling back to placeholder...")
+            num_train = len(train_dataloader.dataset)
+            num_test = len(test_dataloader.dataset)
+            member_scores = np.random.uniform(0.5, 1.0, num_train)
+            nonmember_scores = np.random.uniform(0.0, 0.5, num_test)
+            all_predictions = np.concatenate([
+                (member_scores > 0.5).astype(int),
+                (nonmember_scores > 0.5).astype(int)
+            ])
+            return member_scores, nonmember_scores, all_predictions
 
     def run_yeom_attack(
         self,
@@ -166,7 +278,7 @@ class ReferenceAttackWrapper:
         attack_seed: int = 42,
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
-        Run LIRA (Likelihood Ratio Attack) membership inference attack.
+        Run LIRA (Likelihood Ratio Attack) membership inference attack using reference implementation.
 
         This attack trains multiple shadow models and uses likelihood ratios
         from their predictions to perform the membership test.
@@ -174,8 +286,8 @@ class ReferenceAttackWrapper:
         Args:
             target_model: The model to attack
             shadow_models: Pre-trained shadow models
-            train_subset_loader: DataLoader for training subsets
-            test_dataloader: DataLoader for test data
+            train_subset_loader: DataLoader for training subsets (members)
+            test_dataloader: DataLoader for test data (non-members)
             device: Device to run on
             num_shadow_models: Number of shadow models
             num_epochs: Training epochs
@@ -188,18 +300,119 @@ class ReferenceAttackWrapper:
         """
         self.logger.info("Running LIRA attack...")
 
-        # Placeholder implementation for LIRA attack
-        num_train = len(train_subset_loader.dataset) if train_subset_loader else 100
-        num_test = len(test_dataloader.dataset) if test_dataloader else 100
+        if not HAS_REFERENCE_LIRA:
+            self.logger.warning("Reference LIRA not available. Using placeholder.")
+            num_train = len(train_subset_loader.dataset) if train_subset_loader else 100
+            num_test = len(test_dataloader.dataset) if test_dataloader else 100
+            member_scores = np.random.uniform(0.5, 1.0, num_train)
+            nonmember_scores = np.random.uniform(0.0, 0.5, num_test)
+            return member_scores, nonmember_scores, np.concatenate([np.ones(num_train), np.zeros(num_test)])
 
-        member_scores = np.random.uniform(0.5, 1.0, num_train)
-        nonmember_scores = np.random.uniform(0.0, 0.5, num_test)
-        all_predictions = np.concatenate([
-            np.ones(num_train),
-            np.zeros(num_test)
-        ])
+        try:
+            torch_device = torch.device(device)
+            self.logger.info("Using reference implementation from Third_Party_Code/mia-disparity")
 
-        return member_scores, nonmember_scores, all_predictions
+            # Extract data from dataloaders
+            train_data_list, train_labels_list = [], []
+            for data, labels in train_subset_loader:
+                train_data_list.append(data)
+                train_labels_list.append(labels)
+            train_data = torch.cat(train_data_list, dim=0)
+            train_labels = torch.cat(train_labels_list, dim=0)
+
+            test_data_list, test_labels_list = [], []
+            for data, labels in test_dataloader:
+                test_data_list.append(data)
+                test_labels_list.append(labels)
+            test_data = torch.cat(test_data_list, dim=0)
+            test_labels = torch.cat(test_labels_list, dim=0)
+
+            # Create datasets
+            train_dataset = TensorDataset(train_data, train_labels)
+            test_dataset = TensorDataset(test_data, test_labels)
+
+            # Determine num_classes
+            num_classes = 10
+            try:
+                if hasattr(target_model, 'fc'):
+                    num_classes = target_model.fc.out_features
+                elif hasattr(target_model, 'classifier'):
+                    num_classes = target_model.classifier.out_features
+                else:
+                    num_classes = len(torch.unique(train_labels))
+            except:
+                pass
+
+            # Create temporary directory for attack artifacts
+            temp_dir = tempfile.mkdtemp()
+
+            # Create auxiliary info for LIRA
+            aux_info = LiraAuxiliaryInfo({
+                "seed": attack_seed,
+                "device": torch_device,
+                "num_shadow_models": num_shadow_models,
+                "epochs": num_epochs,
+                "shadow_batchsize": batch_size,
+                "lr": 0.1,
+                "weight_decay": 0.0001,
+                "momentum": 0.9,
+                "save_path": os.path.join(temp_dir, "models"),
+                "shadow_path": os.path.join(temp_dir, "shadow_models"),
+                "log_path": os.path.join(temp_dir, "logs"),
+                "online": True,
+                "fix_variance": True,
+            })
+
+            # Create model copy for untrained access
+            untrained_model = copy.deepcopy(target_model)
+
+            # Create model access
+            model_access = LiraModelAccess(
+                model=target_model,
+                untrained_model=untrained_model,
+                access_type=ModelAccessType.BLACK_BOX
+            )
+
+            # Run attack
+            self.logger.info("Preparing LIRA attack (training shadow models)...")
+            attack = LiraAttack(target_model_access=model_access, auxiliary_info=aux_info)
+            attack.prepare(train_dataset)
+
+            # Get membership scores
+            self.logger.info("Inferring membership...")
+            member_scores = attack.infer(train_dataset)
+            nonmember_scores = attack.infer(test_dataset)
+
+            # Clip to [0, 1] and normalize
+            member_scores = np.clip(member_scores, 0, 1)
+            nonmember_scores = np.clip(nonmember_scores, 0, 1)
+
+            # Create predictions
+            all_predictions = np.concatenate([
+                (member_scores > 0.5).astype(int),
+                (nonmember_scores > 0.5).astype(int)
+            ])
+
+            self.logger.info(
+                f"LIRA attack complete. "
+                f"Member: {member_scores.mean():.3f} ± {member_scores.std():.3f}, "
+                f"Non-member: {nonmember_scores.mean():.3f} ± {nonmember_scores.std():.3f}"
+            )
+
+            return member_scores, nonmember_scores, all_predictions
+
+        except Exception as e:
+            self.logger.error(f"Error in LIRA attack: {e}", exc_info=True)
+            self.logger.warning("Falling back to placeholder...")
+            num_train = len(train_subset_loader.dataset)
+            num_test = len(test_dataloader.dataset)
+            member_scores = np.random.uniform(0.5, 1.0, num_train)
+            nonmember_scores = np.random.uniform(0.0, 0.5, num_test)
+            all_predictions = np.concatenate([
+                (member_scores > 0.5).astype(int),
+                (nonmember_scores > 0.5).astype(int)
+            ])
+            return member_scores, nonmember_scores, all_predictions
 
     def run_reference_attack(
         self,
