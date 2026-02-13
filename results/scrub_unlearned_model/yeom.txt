@@ -1,0 +1,75 @@
+================================================================================
+MIA EXPERIMENT: mia_disparity_cifar10
+================================================================================
+Device: cuda
+Loading dataset...
+100% 170M/170M [00:12<00:00, 13.3MB/s]
+Creating retain/forget splits...
+Dataset: cifar10
+  Training samples: 50000
+  Test samples: 10000
+  Forget set: 10000 (20%)
+  Retain set (members): 40000 (80%)
+Loading unlearned model from /content/gdrive/My Drive/mia_checkpoints/scrub_unlearned_model.pt
+Checkpoint is a state_dict; creating model and loading weights...
+Using command-line attack override: ['yeom']
+Attacks to run: ['yeom']
+Output directory: ./results/mia_disparity
+
+================================================================================
+EXECUTING MIA ATTACKS
+================================================================================
+MIA Runner initialized for cifar10
+Unlearning method: scrub
+Model architecture: resnet18
+
+[1/1] Running yeom...
+  ✓ yeom completed
+
+================================================================================
+EVALUATION
+================================================================================
+Ground truth: 40000 members, 10000 non-members
+Total samples in ground truth: 50000
+Evaluating all attacks...
+yeom: {'auc': 0.503711265, 'tpr_at_fpr_0.01': 0.00825, 'tpr_at_fpr_0.001': 0.001125, 'accuracy': 0.47424}
+
+Attack Performance:
+
+yeom:
+  auc: 0.5037
+  tpr_at_fpr_0.01: 0.0083
+  tpr_at_fpr_0.001: 0.0011
+  accuracy: 0.4742
+
+================================================================================
+SAVING RESULTS
+================================================================================
+Saving results to ./results/mia_disparity...
+Results saved to ./results/mia_disparity
+Evaluating all attacks...
+yeom: {'auc': 0.503711265, 'tpr_at_fpr_0.01': 0.00825, 'tpr_at_fpr_0.001': 0.001125, 'accuracy': 0.47424}
+
+================================================================================
+MEMBERSHIP INFERENCE ATTACK EVALUATION REPORT
+================================================================================
+Dataset: cifar10
+Model: resnet18
+Unlearning Method: scrub
+Date: True
+
+INDIVIDUAL ATTACK RESULTS:
+--------------------------------------------------------------------------------
+
+yeom:
+  auc: 0.5037
+  tpr_at_fpr_0.01: 0.0083
+  tpr_at_fpr_0.001: 0.0011
+  accuracy: 0.4742
+
+================================================================================
+Report saved to: ./results/mia_disparity/evaluation_report.txt
+
+================================================================================
+EXPERIMENT COMPLETE
+================================================================================
