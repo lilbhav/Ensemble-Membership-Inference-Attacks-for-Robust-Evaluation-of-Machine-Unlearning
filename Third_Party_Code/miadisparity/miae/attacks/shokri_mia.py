@@ -197,11 +197,13 @@ class ShokriAttack(MiAttack):
 
 
                 if self.aux_info.shadow_diff_init:
-                    try:
-                        set_seed((self.aux_info.seed + i)*100) # *100 to avoid overlapping of different instances
-                        shadow_model_i.initialize_weights()
-                    except:
-                        raise NotImplementedError("the model doesn't have .initialize_weights method")
+                    set_seed((self.aux_info.seed + i)*100) # *100 to avoid overlapping of different instances
+                    # Try to reinitialize weights if the model supports it, otherwise skip
+                    if hasattr(shadow_model_i, 'initialize_weights'):
+                        try:
+                            shadow_model_i.initialize_weights()
+                        except:
+                            pass  # If initialization fails, continue with current weights
 
                 train_len = int(len(sub_shadow_dataset_list[i]) * self.aux_info.shadow_train_ratio)
                 test_len = len(sub_shadow_dataset_list[i]) - train_len

@@ -268,7 +268,7 @@ class ReferenceAttackWrapper:
         self,
         target_model: nn.Module,
         shadow_models: Optional[list] = None,
-        train_subset_loader: Optional[DataLoader] = None,
+        train_dataloader: Optional[DataLoader] = None,
         test_dataloader: Optional[DataLoader] = None,
         device: str = "cuda",
         num_shadow_models: int = 32,
@@ -286,7 +286,7 @@ class ReferenceAttackWrapper:
         Args:
             target_model: The model to attack
             shadow_models: Pre-trained shadow models
-            train_subset_loader: DataLoader for training subsets (members)
+            train_dataloader: DataLoader for training subsets (members)
             test_dataloader: DataLoader for test data (non-members)
             device: Device to run on
             num_shadow_models: Number of shadow models
@@ -302,7 +302,7 @@ class ReferenceAttackWrapper:
 
         if not HAS_REFERENCE_LIRA:
             self.logger.warning("Reference LIRA not available. Using placeholder.")
-            num_train = len(train_subset_loader.dataset) if train_subset_loader else 100
+            num_train = len(train_dataloader.dataset) if train_dataloader else 100
             num_test = len(test_dataloader.dataset) if test_dataloader else 100
             member_scores = np.random.uniform(0.5, 1.0, num_train)
             nonmember_scores = np.random.uniform(0.0, 0.5, num_test)
@@ -314,7 +314,7 @@ class ReferenceAttackWrapper:
 
             # Extract data from dataloaders
             train_data_list, train_labels_list = [], []
-            for data, labels in train_subset_loader:
+            for data, labels in train_dataloader:
                 train_data_list.append(data)
                 train_labels_list.append(labels)
             train_data = torch.cat(train_data_list, dim=0)
@@ -404,7 +404,7 @@ class ReferenceAttackWrapper:
         except Exception as e:
             self.logger.error(f"Error in LIRA attack: {e}", exc_info=True)
             self.logger.warning("Falling back to placeholder...")
-            num_train = len(train_subset_loader.dataset)
+            num_train = len(train_dataloader.dataset)
             num_test = len(test_dataloader.dataset)
             member_scores = np.random.uniform(0.5, 1.0, num_train)
             nonmember_scores = np.random.uniform(0.0, 0.5, num_test)
