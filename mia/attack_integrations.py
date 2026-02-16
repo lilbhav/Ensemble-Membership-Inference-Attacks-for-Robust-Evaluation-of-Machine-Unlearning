@@ -29,7 +29,7 @@ if _REF_CODE_PATH not in sys.path:
 # Try to import reference implementations
 try:
     from Third_Party_Code.miadisparity.miae.attacks.aug_mia import AugAttack, AugAuxiliaryInfo, AugModelAccess
-    from Third_Party_Code.miadisparity.miae.attacks.base import ModelAccessType
+    from Third_Party_Code.miadisparity.miae.attacks.base import ModelAccessType, AttackTrainingSet
     HAS_REFERENCE_AUGMENTATION = True
 except ImportError:
     HAS_REFERENCE_AUGMENTATION = False
@@ -45,6 +45,14 @@ try:
     HAS_REFERENCE_LIRA = True
 except ImportError:
     HAS_REFERENCE_LIRA = False
+
+# Register safe globals for PyTorch 2.6+ compatibility
+# This allows unpickling custom classes used by reference attacks
+if HAS_REFERENCE_AUGMENTATION:
+    try:
+        torch.serialization.add_safe_globals([AttackTrainingSet])
+    except Exception as e:
+        logging.warning(f"Could not register safe globals: {e}")
 
 def _import_aug_attacks():
     """Wrapper for compatibility - attacks already loaded at module init."""
@@ -181,15 +189,28 @@ class ReferenceAttackWrapper:
                 access_type=ModelAccessType.BLACK_BOX
             )
 
-            # Run attack
+            # Run attack with safe globals context for PyTorch 2.6
             self.logger.info("Preparing Shokri attack (training shadow models)...")
             attack = ShokriAttack(target_model_access=model_access, auxiliary_info=aux_info)
-            attack.prepare(train_dataset)
+            
+            # Use context manager for safe unpickling of custom classes
+            try:
+                with torch.serialization.safe_globals([AttackTrainingSet]):
+                    attack.prepare(train_dataset)
+            except TypeError:
+                # Fallback if safe_globals doesn't support context manager
+                attack.prepare(train_dataset)
 
-            # Get membership scores
+            # Get membership scores with safe globals context
             self.logger.info("Inferring membership...")
-            member_scores = attack.infer(train_dataset)
-            nonmember_scores = attack.infer(test_dataset)
+            try:
+                with torch.serialization.safe_globals([AttackTrainingSet]):
+                    member_scores = attack.infer(train_dataset)
+                    nonmember_scores = attack.infer(test_dataset)
+            except TypeError:
+                # Fallback if safe_globals doesn't support context manager
+                member_scores = attack.infer(train_dataset)
+                nonmember_scores = attack.infer(test_dataset)
 
             # Clip to [0, 1]
             member_scores = np.clip(member_scores, 0, 1)
@@ -636,15 +657,27 @@ class ReferenceAttackWrapper:
                 access_type=ModelAccessType.LABEL_ONLY
             )
 
-            # Run attack
+            # Run attack with safe globals context
             self.logger.info("Preparing augmentation attack (training shadow model)...")
             attack = AugAttack(target_model_access=model_access, auxiliary_info=aux_info)
-            attack.prepare(train_dataset)
+            
+            try:
+                with torch.serialization.safe_globals([AttackTrainingSet]):
+                    attack.prepare(train_dataset)
+            except TypeError:
+                # Fallback if safe_globals doesn't support context manager
+                attack.prepare(train_dataset)
 
-            # Get membership scores
+            # Get membership scores with safe globals context
             self.logger.info("Inferring membership...")
-            member_scores = attack.infer(train_dataset)
-            nonmember_scores = attack.infer(test_dataset)
+            try:
+                with torch.serialization.safe_globals([AttackTrainingSet]):
+                    member_scores = attack.infer(train_dataset)
+                    nonmember_scores = attack.infer(test_dataset)
+            except TypeError:
+                # Fallback if safe_globals doesn't support context manager
+                member_scores = attack.infer(train_dataset)
+                nonmember_scores = attack.infer(test_dataset)
 
             # Clip to [0, 1]
             member_scores = np.clip(member_scores, 0, 1)

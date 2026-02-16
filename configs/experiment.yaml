@@ -38,7 +38,7 @@ mia:
 
     - name: "lira"
       params:
-        num_shadow_models: 32
+        num_shadow_models: 16
 
     - name: "reference"
       params:
