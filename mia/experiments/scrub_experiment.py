@@ -6,6 +6,8 @@ import torch.optim as optim
 import sys
 from types import SimpleNamespace
 import os
+import random
+import numpy as np
 import yaml
 
 # Adding necessary paths to the system path
@@ -21,6 +23,18 @@ import torchvision.models as models
 # Third party code imports
 from Third_Party_Code.SCRUB.thirdparty.repdistiller.distiller_zoo.KD import DistillKL
 from Third_Party_Code.SCRUB.thirdparty.repdistiller.helper.loops import train_distill
+
+
+def set_global_determinism(seed: int) -> None:
+    """Set deterministic seeds for reproducible dataset splits and training order."""
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+    if hasattr(torch.backends, "cudnn"):
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
 
 
 def freeze_bn(model):
@@ -291,6 +305,10 @@ def main():
     with open(cli_args.config, 'r') as f:
         config_dict = yaml.safe_load(f)
     args = SimpleNamespace(**config_dict)
+    if not hasattr(args, "split_dir"):
+        args.split_dir = "./data/splits"
+
+    set_global_determinism(int(args.seed))
 
     # ========== 1. LOAD DATA ==========
     print("Loading dataset...")
@@ -301,7 +319,7 @@ def main():
     )
 
     # ========== 2. CREATE SPLITS ==========
-    split_dir = "./data/splits"
+    split_dir = args.split_dir
     forget_idx_path = os.path.join(split_dir, "forget_idx.npy")
     retain_idx_path = os.path.join(split_dir, "retain_idx.npy")
 
@@ -327,8 +345,17 @@ def main():
     retain_train_len = int(0.9 * retain_len)
     forget_train_len = int(0.9 * forget_len)
 
-    retain_train, retain_val = random_split(retain_set, [retain_train_len, retain_len - retain_train_len])
-    forget_train, forget_val = random_split(forget_set, [forget_train_len, forget_len - forget_train_len])
+    split_generator = torch.Generator().manual_seed(int(args.seed))
+    retain_train, retain_val = random_split(
+        retain_set,
+        [retain_train_len, retain_len - retain_train_len],
+        generator=split_generator,
+    )
+    forget_train, forget_val = random_split(
+        forget_set,
+        [forget_train_len, forget_len - forget_train_len],
+        generator=split_generator,
+    )
 
     print(f"  Retain train: {len(retain_train)}, Retain val: {len(retain_val)}")
     print(f"  Forget train: {len(forget_train)}, Forget val: {len(forget_val)}")
@@ -341,6 +368,7 @@ def main():
             retain_train,
             batch_size=args.batch_size,
             shuffle=True,
+            generator=split_generator,
             num_workers=args.num_workers,
             pin_memory=pin_memory
         ),
@@ -348,6 +376,7 @@ def main():
             forget_train,
             batch_size=args.batch_size,
             shuffle=True,
+            generator=split_generator,
             num_workers=args.num_workers,
             pin_memory=pin_memory
         ),

@@ -6,6 +6,7 @@ experiment:
 dataset:
   name: "cifar10"
   data_root: "./data"
+  split_dir: "./data/splits"
   forget_fraction: 0.2
   retain_fraction: 0.8
   num_classes: 10

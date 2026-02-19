@@ -1,0 +1,435 @@
+================================================================================
+MIA EXPERIMENT: mia_disparity_cifar10
+================================================================================
+Device: cuda
+Loading dataset...
+100% 170M/170M [00:05<00:00, 29.8MB/s]
+Creating retain/forget splits...
+Dataset: cifar10
+  Training samples: 50000
+  Test samples: 10000
+  Forget set: 10000 (20%)
+  Retain set (members): 40000 (80%)
+Loading unlearned model from /content/gdrive/My Drive/mia_checkpoints/scrub_unlearned_model.pt
+Checkpoint is a state_dict; creating model and loading weights...
+/usr/local/lib/python3.12/dist-packages/torchvision/models/_utils.py:208: UserWarning: The parameter 'pretrained' is deprecated since 0.13 and may be removed in the future, please use 'weights' instead.
+  warnings.warn(
+/usr/local/lib/python3.12/dist-packages/torchvision/models/_utils.py:223: UserWarning: Arguments other than a weight enum or `None` for 'weights' are deprecated since 0.13 and may be removed in the future. The current behavior is equivalent to passing `weights=None`.
+  warnings.warn(msg)
+Using command-line attack override: ['shokri', 'lira']
+Attacks to run: ['shokri', 'lira']
+Output directory: ./results/mia_disparity
+
+================================================================================
+EXECUTING MIA ATTACKS
+================================================================================
+MIA Runner initialized for cifar10
+Unlearning method: scrub
+Model architecture: resnet18
+
+[1/2] Running shokri...
+Start preparing the attack...
+Shadow dataset[0] size: 4000
+Training shadow model 1/10...
+  0% 0/10 [00:00<?, ?it/s]Epoch 0, train_acc: 69.95%, test_acc: 63.20%, Loss:69.4564, lr: 0.0098
+ 90% 9/10 [00:07<00:00,  1.52it/s]Epoch 9, train_acc: 99.65%, test_acc: 61.80%, Loss:6.8815, lr: 0.0000
+100% 10/10 [00:08<00:00,  1.15it/s]
+Training shadow model 2/10...
+  0% 0/10 [00:00<?, ?it/s]Epoch 0, train_acc: 66.15%, test_acc: 62.65%, Loss:69.3939, lr: 0.0098
+ 90% 9/10 [00:06<00:00,  1.60it/s]Epoch 9, train_acc: 99.55%, test_acc: 63.10%, Loss:9.0821, lr: 0.0000
+100% 10/10 [00:07<00:00,  1.42it/s]
+Training shadow model 3/10...
+  0% 0/10 [00:00<?, ?it/s]Epoch 0, train_acc: 68.00%, test_acc: 58.80%, Loss:68.2363, lr: 0.0098
+ 90% 9/10 [00:06<00:00,  1.60it/s]Epoch 9, train_acc: 99.55%, test_acc: 58.45%, Loss:6.1135, lr: 0.0000
+100% 10/10 [00:07<00:00,  1.41it/s]
+Training shadow model 4/10...
+  0% 0/10 [00:00<?, ?it/s]Epoch 0, train_acc: 68.60%, test_acc: 64.35%, Loss:70.5805, lr: 0.0098
+ 90% 9/10 [00:05<00:00,  1.62it/s]Epoch 9, train_acc: 99.60%, test_acc: 61.90%, Loss:6.7210, lr: 0.0000
+100% 10/10 [00:06<00:00,  1.43it/s]
+Training shadow model 5/10...
+  0% 0/10 [00:00<?, ?it/s]Epoch 0, train_acc: 68.05%, test_acc: 62.25%, Loss:69.8502, lr: 0.0098
+ 90% 9/10 [00:05<00:00,  1.62it/s]Epoch 9, train_acc: 99.55%, test_acc: 61.30%, Loss:7.5171, lr: 0.0000
+100% 10/10 [00:06<00:00,  1.44it/s]
+Training shadow model 6/10...
+  0% 0/10 [00:00<?, ?it/s]Epoch 0, train_acc: 67.95%, test_acc: 60.35%, Loss:69.4899, lr: 0.0098
+ 90% 9/10 [00:05<00:00,  1.61it/s]Epoch 9, train_acc: 99.25%, test_acc: 59.85%, Loss:9.6582, lr: 0.0000
+100% 10/10 [00:06<00:00,  1.43it/s]
+Training shadow model 7/10...
+  0% 0/10 [00:00<?, ?it/s]Epoch 0, train_acc: 68.10%, test_acc: 63.90%, Loss:70.1390, lr: 0.0098
+ 90% 9/10 [00:05<00:00,  1.61it/s]Epoch 9, train_acc: 99.15%, test_acc: 61.00%, Loss:8.7918, lr: 0.0000
+100% 10/10 [00:06<00:00,  1.43it/s]
+Training shadow model 8/10...
+  0% 0/10 [00:00<?, ?it/s]Epoch 0, train_acc: 70.80%, test_acc: 62.15%, Loss:66.3513, lr: 0.0098
+ 90% 9/10 [00:06<00:00,  1.60it/s]Epoch 9, train_acc: 99.70%, test_acc: 58.60%, Loss:6.6306, lr: 0.0000
+100% 10/10 [00:07<00:00,  1.42it/s]
+Training shadow model 9/10...
+  0% 0/10 [00:00<?, ?it/s]Epoch 0, train_acc: 69.00%, test_acc: 61.15%, Loss:68.0839, lr: 0.0098
+ 90% 9/10 [00:05<00:00,  1.62it/s]Epoch 9, train_acc: 99.50%, test_acc: 60.35%, Loss:7.7669, lr: 0.0000
+100% 10/10 [00:06<00:00,  1.44it/s]
+Training shadow model 10/10...
+  0% 0/10 [00:00<?, ?it/s]Epoch 0, train_acc: 68.45%, test_acc: 62.45%, Loss:70.5545, lr: 0.0098
+ 90% 9/10 [00:05<00:00,  1.62it/s]Epoch 9, train_acc: 99.60%, test_acc: 59.80%, Loss:7.2504, lr: 0.0000
+100% 10/10 [00:06<00:00,  1.44it/s]
+Shokri prepare hit PyTorch safe-load guard; retrying with trusted weights_only=False fallback.
+Start preparing the attack...
+Shadow dataset[0] size: 4000
+Training attack model for 0/10 label "0" ...
+  0% 0/10 [00:00<?, ?it/s]Epoch: 0, train_acc: 73.40%, Loss: 78.1165
+ 90% 9/10 [00:02<00:00,  4.41it/s]Epoch: 9, train_acc: 74.89%, Loss: 70.2356
+100% 10/10 [00:02<00:00,  4.05it/s]
+Training attack model for 1/10 label "1" ...
+  0% 0/10 [00:00<?, ?it/s]Epoch: 0, train_acc: 59.56%, Loss: 81.7413
+ 90% 9/10 [00:02<00:00,  4.11it/s]Epoch: 9, train_acc: 70.46%, Loss: 74.9710
+100% 10/10 [00:02<00:00,  3.87it/s]
+Training attack model for 2/10 label "2" ...
+  0% 0/10 [00:00<?, ?it/s]Epoch: 0, train_acc: 80.05%, Loss: 71.1657
+ 90% 9/10 [00:02<00:00,  4.23it/s]Epoch: 9, train_acc: 79.29%, Loss: 60.9689
+100% 10/10 [00:02<00:00,  3.94it/s]
+Training attack model for 3/10 label "3" ...
+  0% 0/10 [00:00<?, ?it/s]Epoch: 0, train_acc: 81.14%, Loss: 71.9910
+ 90% 9/10 [00:02<00:00,  4.15it/s]Epoch: 9, train_acc: 83.61%, Loss: 59.5912
+100% 10/10 [00:02<00:00,  3.93it/s]
+Training attack model for 4/10 label "4" ...
+  0% 0/10 [00:00<?, ?it/s]Epoch: 0, train_acc: 75.17%, Loss: 73.3429
+ 90% 9/10 [00:02<00:00,  4.10it/s]Epoch: 9, train_acc: 82.12%, Loss: 63.1543
+100% 10/10 [00:02<00:00,  3.84it/s]
+Training attack model for 5/10 label "5" ...
+  0% 0/10 [00:00<?, ?it/s]Epoch: 0, train_acc: 76.36%, Loss: 71.0736
+ 90% 9/10 [00:02<00:00,  4.18it/s]Epoch: 9, train_acc: 81.05%, Loss: 61.2926
+100% 10/10 [00:02<00:00,  3.88it/s]
+Training attack model for 6/10 label "6" ...
+  0% 0/10 [00:00<?, ?it/s]Epoch: 0, train_acc: 73.20%, Loss: 76.9380
+ 90% 9/10 [00:02<00:00,  4.26it/s]Epoch: 9, train_acc: 74.58%, Loss: 70.4707
+100% 10/10 [00:02<00:00,  3.93it/s]
+Training attack model for 7/10 label "7" ...
+  0% 0/10 [00:00<?, ?it/s]Epoch: 0, train_acc: 72.94%, Loss: 79.0891
+ 90% 9/10 [00:02<00:00,  4.38it/s]Epoch: 9, train_acc: 74.84%, Loss: 70.2570
+100% 10/10 [00:02<00:00,  4.07it/s]
+Training attack model for 8/10 label "8" ...
+  0% 0/10 [00:00<?, ?it/s]Epoch: 0, train_acc: 69.52%, Loss: 80.6159
+ 90% 9/10 [00:02<00:00,  4.19it/s]Epoch: 9, train_acc: 71.28%, Loss: 72.3336
+100% 10/10 [00:02<00:00,  3.92it/s]
+Training attack model for 9/10 label "9" ...
+  0% 0/10 [00:00<?, ?it/s]Epoch: 0, train_acc: 72.35%, Loss: 78.0685
+ 90% 9/10 [00:02<00:00,  4.46it/s]Epoch: 9, train_acc: 73.74%, Loss: 69.5189
+100% 10/10 [00:02<00:00,  4.08it/s]
+Finish preparing the attack...
+Start membership inference...
+Finish membership inference...
+Start membership inference...
+Finish membership inference...
+  ✓ shokri completed
+
+[2/2] Running lira...
+Start preparing the attack...
+Finish preparing the attack...
+Start membership inference...
+training shadow model #0 with train size: 39815 and test size: 40185
+ 90% 9/10 [02:28<00:16, 16.51s/it]Train Shadow Model #0: 10/10: TRAIN loss: 0.007, TRAIN acc: 99.905%, TEST acc: 89.678%, lr:  0.0000
+100% 10/10 [02:45<00:00, 16.52s/it]
+training shadow model #1 with train size: 39873 and test size: 40127
+ 90% 9/10 [02:29<00:16, 16.63s/it]Train Shadow Model #1: 10/10: TRAIN loss: 0.008, TRAIN acc: 99.895%, TEST acc: 89.553%, lr:  0.0000
+100% 10/10 [02:46<00:00, 16.60s/it]
+training shadow model #2 with train size: 39980 and test size: 40020
+ 90% 9/10 [02:30<00:16, 16.68s/it]Train Shadow Model #2: 10/10: TRAIN loss: 0.007, TRAIN acc: 99.922%, TEST acc: 89.815%, lr:  0.0000
+100% 10/10 [02:46<00:00, 16.66s/it]
+training shadow model #3 with train size: 40216 and test size: 39784
+ 90% 9/10 [02:31<00:16, 16.82s/it]Train Shadow Model #3: 10/10: TRAIN loss: 0.007, TRAIN acc: 99.891%, TEST acc: 90.081%, lr:  0.0000
+100% 10/10 [02:48<00:00, 16.83s/it]
+training shadow model #4 with train size: 40113 and test size: 39887
+ 90% 9/10 [02:30<00:16, 16.75s/it]Train Shadow Model #4: 10/10: TRAIN loss: 0.008, TRAIN acc: 99.873%, TEST acc: 89.957%, lr:  0.0000
+100% 10/10 [02:47<00:00, 16.76s/it]
+training shadow model #5 with train size: 39998 and test size: 40002
+ 90% 9/10 [02:31<00:16, 16.79s/it]Train Shadow Model #5: 10/10: TRAIN loss: 0.007, TRAIN acc: 99.912%, TEST acc: 89.736%, lr:  0.0000
+100% 10/10 [02:47<00:00, 16.78s/it]
+training shadow model #6 with train size: 39856 and test size: 40144
+ 90% 9/10 [02:30<00:16, 16.70s/it]Train Shadow Model #6: 10/10: TRAIN loss: 0.008, TRAIN acc: 99.885%, TEST acc: 89.847%, lr:  0.0000
+100% 10/10 [02:46<00:00, 16.68s/it]
+training shadow model #7 with train size: 40017 and test size: 39983
+ 90% 9/10 [02:30<00:16, 16.68s/it]Train Shadow Model #7: 10/10: TRAIN loss: 0.008, TRAIN acc: 99.888%, TEST acc: 90.071%, lr:  0.0000
+100% 10/10 [02:46<00:00, 16.69s/it]
+training shadow model #8 with train size: 40031 and test size: 39969
+ 90% 9/10 [02:30<00:16, 16.75s/it]Train Shadow Model #8: 10/10: TRAIN loss: 0.008, TRAIN acc: 99.910%, TEST acc: 89.657%, lr:  0.0000
+100% 10/10 [02:47<00:00, 16.73s/it]
+training shadow model #9 with train size: 39868 and test size: 40132
+ 90% 9/10 [02:30<00:16, 16.81s/it]Train Shadow Model #9: 10/10: TRAIN loss: 0.008, TRAIN acc: 99.902%, TEST acc: 90.128%, lr:  0.0000
+100% 10/10 [02:47<00:00, 16.77s/it]
+training shadow model #10 with train size: 39953 and test size: 40047
+ 90% 9/10 [02:29<00:16, 16.61s/it]Train Shadow Model #10: 10/10: TRAIN loss: 0.007, TRAIN acc: 99.907%, TEST acc: 89.360%, lr:  0.0000
+100% 10/10 [02:46<00:00, 16.62s/it]
+training shadow model #11 with train size: 39874 and test size: 40126
+ 90% 9/10 [02:30<00:16, 16.84s/it]Train Shadow Model #11: 10/10: TRAIN loss: 0.010, TRAIN acc: 99.850%, TEST acc: 89.304%, lr:  0.0000
+100% 10/10 [02:47<00:00, 16.76s/it]
+training shadow model #12 with train size: 40066 and test size: 39934
+ 90% 9/10 [02:29<00:16, 16.65s/it]Train Shadow Model #12: 10/10: TRAIN loss: 0.009, TRAIN acc: 99.845%, TEST acc: 89.645%, lr:  0.0000
+100% 10/10 [02:46<00:00, 16.66s/it]
+training shadow model #13 with train size: 40053 and test size: 39947
+ 90% 9/10 [02:30<00:16, 16.68s/it]Train Shadow Model #13: 10/10: TRAIN loss: 0.008, TRAIN acc: 99.903%, TEST acc: 89.822%, lr:  0.0000
+100% 10/10 [02:46<00:00, 16.69s/it]
+training shadow model #14 with train size: 39922 and test size: 40078
+ 90% 9/10 [02:30<00:16, 16.67s/it]Train Shadow Model #14: 10/10: TRAIN loss: 0.007, TRAIN acc: 99.890%, TEST acc: 89.770%, lr:  0.0000
+100% 10/10 [02:46<00:00, 16.68s/it]
+training shadow model #15 with train size: 40123 and test size: 39877
+ 90% 9/10 [02:30<00:16, 16.73s/it]Train Shadow Model #15: 10/10: TRAIN loss: 0.007, TRAIN acc: 99.928%, TEST acc: 89.638%, lr:  0.0000
+100% 10/10 [02:47<00:00, 16.71s/it]
+training shadow model #16 with train size: 40191 and test size: 39809
+ 90% 9/10 [02:30<00:16, 16.81s/it]Train Shadow Model #16: 10/10: TRAIN loss: 0.007, TRAIN acc: 99.918%, TEST acc: 89.997%, lr:  0.0000
+100% 10/10 [02:47<00:00, 16.76s/it]
+training shadow model #17 with train size: 39684 and test size: 40316
+ 90% 9/10 [02:29<00:16, 16.60s/it]Train Shadow Model #17: 10/10: TRAIN loss: 0.008, TRAIN acc: 99.892%, TEST acc: 89.441%, lr:  0.0000
+100% 10/10 [02:45<00:00, 16.60s/it]
+training shadow model #18 with train size: 39963 and test size: 40037
+ 90% 9/10 [02:30<00:16, 16.72s/it]Train Shadow Model #18: 10/10: TRAIN loss: 0.008, TRAIN acc: 99.900%, TEST acc: 89.435%, lr:  0.0000
+100% 10/10 [02:46<00:00, 16.70s/it]
+training shadow model #19 with train size: 40086 and test size: 39914
+ 90% 9/10 [02:30<00:16, 16.74s/it]Train Shadow Model #19: 10/10: TRAIN loss: 0.007, TRAIN acc: 99.908%, TEST acc: 90.124%, lr:  0.0000
+100% 10/10 [02:47<00:00, 16.77s/it]
+training shadow model #20 with train size: 39933 and test size: 40067
+ 90% 9/10 [02:30<00:16, 16.71s/it]Train Shadow Model #20: 10/10: TRAIN loss: 0.008, TRAIN acc: 99.895%, TEST acc: 89.533%, lr:  0.0000
+100% 10/10 [02:47<00:00, 16.73s/it]
+training shadow model #21 with train size: 40028 and test size: 39972
+ 90% 9/10 [02:29<00:16, 16.65s/it]Train Shadow Model #21: 10/10: TRAIN loss: 0.008, TRAIN acc: 99.888%, TEST acc: 90.056%, lr:  0.0000
+100% 10/10 [02:46<00:00, 16.66s/it]
+training shadow model #22 with train size: 40121 and test size: 39879
+ 90% 9/10 [02:30<00:16, 16.72s/it]Train Shadow Model #22: 10/10: TRAIN loss: 0.008, TRAIN acc: 99.868%, TEST acc: 89.782%, lr:  0.0000
+100% 10/10 [02:46<00:00, 16.70s/it]
+training shadow model #23 with train size: 39968 and test size: 40032
+ 90% 9/10 [02:30<00:16, 16.68s/it]Train Shadow Model #23: 10/10: TRAIN loss: 0.007, TRAIN acc: 99.912%, TEST acc: 89.009%, lr:  0.0000
+100% 10/10 [02:46<00:00, 16.69s/it]
+training shadow model #24 with train size: 39910 and test size: 40090
+ 90% 9/10 [02:30<00:16, 16.72s/it]Train Shadow Model #24: 10/10: TRAIN loss: 0.008, TRAIN acc: 99.917%, TEST acc: 89.706%, lr:  0.0000
+100% 10/10 [02:46<00:00, 16.68s/it]
+training shadow model #25 with train size: 40402 and test size: 39598
+ 90% 9/10 [02:30<00:16, 16.80s/it]Train Shadow Model #25: 10/10: TRAIN loss: 0.007, TRAIN acc: 99.923%, TEST acc: 89.752%, lr:  0.0000
+100% 10/10 [02:47<00:00, 16.77s/it]
+training shadow model #26 with train size: 39961 and test size: 40039
+ 90% 9/10 [02:30<00:16, 16.70s/it]Train Shadow Model #26: 10/10: TRAIN loss: 0.007, TRAIN acc: 99.895%, TEST acc: 89.283%, lr:  0.0000
+100% 10/10 [02:46<00:00, 16.67s/it]
+training shadow model #27 with train size: 39912 and test size: 40088
+ 90% 9/10 [02:30<00:16, 16.67s/it]Train Shadow Model #27: 10/10: TRAIN loss: 0.008, TRAIN acc: 99.882%, TEST acc: 89.635%, lr:  0.0000
+100% 10/10 [02:46<00:00, 16.68s/it]
+training shadow model #28 with train size: 39807 and test size: 40193
+ 90% 9/10 [02:30<00:16, 16.66s/it]Train Shadow Model #28: 10/10: TRAIN loss: 0.009, TRAIN acc: 99.874%, TEST acc: 89.523%, lr:  0.0000
+100% 10/10 [02:46<00:00, 16.69s/it]
+training shadow model #29 with train size: 40017 and test size: 39983
+ 90% 9/10 [02:29<00:16, 16.68s/it]Train Shadow Model #29: 10/10: TRAIN loss: 0.008, TRAIN acc: 99.915%, TEST acc: 90.063%, lr:  0.0000
+100% 10/10 [02:46<00:00, 16.66s/it]
+training shadow model #30 with train size: 40070 and test size: 39930
+ 90% 9/10 [02:31<00:16, 16.87s/it]Train Shadow Model #30: 10/10: TRAIN loss: 0.008, TRAIN acc: 99.883%, TEST acc: 89.737%, lr:  0.0000
+100% 10/10 [02:48<00:00, 16.82s/it]
+training shadow model #31 with train size: 40189 and test size: 39811
+ 90% 9/10 [02:34<00:17, 17.16s/it]Train Shadow Model #31: 10/10: TRAIN loss: 0.008, TRAIN acc: 99.878%, TEST acc: 89.978%, lr:  0.0000
+100% 10/10 [02:51<00:00, 17.19s/it]
+load model [1/32]: /tmp/tmpuvlavczs/shadow_models/0/shadow.pth
+Model 1 mean acc: 0.890375
+load model [2/32]: /tmp/tmpuvlavczs/shadow_models/1/shadow.pth
+Model 2 mean acc: 0.890875
+load model [3/32]: /tmp/tmpuvlavczs/shadow_models/2/shadow.pth
+Model 3 mean acc: 0.889425
+load model [4/32]: /tmp/tmpuvlavczs/shadow_models/3/shadow.pth
+Model 4 mean acc: 0.888075
+load model [5/32]: /tmp/tmpuvlavczs/shadow_models/4/shadow.pth
+Model 5 mean acc: 0.8926
+load model [6/32]: /tmp/tmpuvlavczs/shadow_models/5/shadow.pth
+Model 6 mean acc: 0.891225
+load model [7/32]: /tmp/tmpuvlavczs/shadow_models/6/shadow.pth
+Model 7 mean acc: 0.887025
+load model [8/32]: /tmp/tmpuvlavczs/shadow_models/7/shadow.pth
+Model 8 mean acc: 0.8888
+load model [9/32]: /tmp/tmpuvlavczs/shadow_models/8/shadow.pth
+Model 9 mean acc: 0.895575
+load model [10/32]: /tmp/tmpuvlavczs/shadow_models/9/shadow.pth
+Model 10 mean acc: 0.890825
+load model [11/32]: /tmp/tmpuvlavczs/shadow_models/10/shadow.pth
+Model 11 mean acc: 0.88425
+load model [12/32]: /tmp/tmpuvlavczs/shadow_models/11/shadow.pth
+Model 12 mean acc: 0.882925
+load model [13/32]: /tmp/tmpuvlavczs/shadow_models/12/shadow.pth
+Model 13 mean acc: 0.885525
+load model [14/32]: /tmp/tmpuvlavczs/shadow_models/13/shadow.pth
+Model 14 mean acc: 0.890075
+load model [15/32]: /tmp/tmpuvlavczs/shadow_models/14/shadow.pth
+Model 15 mean acc: 0.884625
+load model [16/32]: /tmp/tmpuvlavczs/shadow_models/15/shadow.pth
+Model 16 mean acc: 0.889175
+load model [17/32]: /tmp/tmpuvlavczs/shadow_models/16/shadow.pth
+Model 17 mean acc: 0.888375
+load model [18/32]: /tmp/tmpuvlavczs/shadow_models/17/shadow.pth
+Model 18 mean acc: 0.88495
+load model [19/32]: /tmp/tmpuvlavczs/shadow_models/18/shadow.pth
+Model 19 mean acc: 0.8864
+load model [20/32]: /tmp/tmpuvlavczs/shadow_models/19/shadow.pth
+Model 20 mean acc: 0.88535
+load model [21/32]: /tmp/tmpuvlavczs/shadow_models/20/shadow.pth
+Model 21 mean acc: 0.8871
+load model [22/32]: /tmp/tmpuvlavczs/shadow_models/21/shadow.pth
+Model 22 mean acc: 0.892375
+load model [23/32]: /tmp/tmpuvlavczs/shadow_models/22/shadow.pth
+Model 23 mean acc: 0.88915
+load model [24/32]: /tmp/tmpuvlavczs/shadow_models/23/shadow.pth
+Model 24 mean acc: 0.8857
+load model [25/32]: /tmp/tmpuvlavczs/shadow_models/24/shadow.pth
+Model 25 mean acc: 0.888775
+load model [26/32]: /tmp/tmpuvlavczs/shadow_models/25/shadow.pth
+Model 26 mean acc: 0.8901
+load model [27/32]: /tmp/tmpuvlavczs/shadow_models/26/shadow.pth
+Model 27 mean acc: 0.88735
+load model [28/32]: /tmp/tmpuvlavczs/shadow_models/27/shadow.pth
+Model 28 mean acc: 0.8897
+load model [29/32]: /tmp/tmpuvlavczs/shadow_models/28/shadow.pth
+Model 29 mean acc: 0.892125
+load model [30/32]: /tmp/tmpuvlavczs/shadow_models/29/shadow.pth
+Model 30 mean acc: 0.889625
+load model [31/32]: /tmp/tmpuvlavczs/shadow_models/30/shadow.pth
+Model 31 mean acc: 0.887425
+load model [32/32]: /tmp/tmpuvlavczs/shadow_models/31/shadow.pth
+Model 32 mean acc: 0.8894
+processing target model
+Finish membership inference...
+Start membership inference...
+shadow models are already trained, skip the training
+load model [1/32]: /tmp/tmpuvlavczs/shadow_models/0/shadow.pth
+Model 1 mean acc: 0.86908
+load model [2/32]: /tmp/tmpuvlavczs/shadow_models/1/shadow.pth
+Model 2 mean acc: 0.86998
+load model [3/32]: /tmp/tmpuvlavczs/shadow_models/2/shadow.pth
+Model 3 mean acc: 0.86756
+load model [4/32]: /tmp/tmpuvlavczs/shadow_models/3/shadow.pth
+Model 4 mean acc: 0.866
+load model [5/32]: /tmp/tmpuvlavczs/shadow_models/4/shadow.pth
+Model 5 mean acc: 0.8711
+load model [6/32]: /tmp/tmpuvlavczs/shadow_models/5/shadow.pth
+Model 6 mean acc: 0.86948
+load model [7/32]: /tmp/tmpuvlavczs/shadow_models/6/shadow.pth
+Model 7 mean acc: 0.86618
+load model [8/32]: /tmp/tmpuvlavczs/shadow_models/7/shadow.pth
+Model 8 mean acc: 0.86804
+load model [9/32]: /tmp/tmpuvlavczs/shadow_models/8/shadow.pth
+Model 9 mean acc: 0.87368
+load model [10/32]: /tmp/tmpuvlavczs/shadow_models/9/shadow.pth
+Model 10 mean acc: 0.86872
+load model [11/32]: /tmp/tmpuvlavczs/shadow_models/10/shadow.pth
+Model 11 mean acc: 0.86222
+load model [12/32]: /tmp/tmpuvlavczs/shadow_models/11/shadow.pth
+Model 12 mean acc: 0.86222
+load model [13/32]: /tmp/tmpuvlavczs/shadow_models/12/shadow.pth
+Model 13 mean acc: 0.86364
+load model [14/32]: /tmp/tmpuvlavczs/shadow_models/13/shadow.pth
+Model 14 mean acc: 0.86738
+load model [15/32]: /tmp/tmpuvlavczs/shadow_models/14/shadow.pth
+Model 15 mean acc: 0.86434
+load model [16/32]: /tmp/tmpuvlavczs/shadow_models/15/shadow.pth
+Model 16 mean acc: 0.86764
+load model [17/32]: /tmp/tmpuvlavczs/shadow_models/16/shadow.pth
+Model 17 mean acc: 0.8667
+load model [18/32]: /tmp/tmpuvlavczs/shadow_models/17/shadow.pth
+Model 18 mean acc: 0.8637
+load model [19/32]: /tmp/tmpuvlavczs/shadow_models/18/shadow.pth
+Model 19 mean acc: 0.86528
+load model [20/32]: /tmp/tmpuvlavczs/shadow_models/19/shadow.pth
+Model 20 mean acc: 0.86376
+load model [21/32]: /tmp/tmpuvlavczs/shadow_models/20/shadow.pth
+Model 21 mean acc: 0.86602
+load model [22/32]: /tmp/tmpuvlavczs/shadow_models/21/shadow.pth
+Model 22 mean acc: 0.87052
+load model [23/32]: /tmp/tmpuvlavczs/shadow_models/22/shadow.pth
+Model 23 mean acc: 0.86684
+load model [24/32]: /tmp/tmpuvlavczs/shadow_models/23/shadow.pth
+Model 24 mean acc: 0.86414
+load model [25/32]: /tmp/tmpuvlavczs/shadow_models/24/shadow.pth
+Model 25 mean acc: 0.8667
+load model [26/32]: /tmp/tmpuvlavczs/shadow_models/25/shadow.pth
+Model 26 mean acc: 0.86974
+load model [27/32]: /tmp/tmpuvlavczs/shadow_models/26/shadow.pth
+Model 27 mean acc: 0.86444
+load model [28/32]: /tmp/tmpuvlavczs/shadow_models/27/shadow.pth
+Model 28 mean acc: 0.86882
+load model [29/32]: /tmp/tmpuvlavczs/shadow_models/28/shadow.pth
+Model 29 mean acc: 0.86894
+load model [30/32]: /tmp/tmpuvlavczs/shadow_models/29/shadow.pth
+Model 30 mean acc: 0.86764
+load model [31/32]: /tmp/tmpuvlavczs/shadow_models/30/shadow.pth
+Model 31 mean acc: 0.86538
+load model [32/32]: /tmp/tmpuvlavczs/shadow_models/31/shadow.pth
+Model 32 mean acc: 0.86728
+processing target model
+Finish membership inference...
+  ✓ lira completed
+
+================================================================================
+EVALUATION
+================================================================================
+Ground truth: 40000 members, 10000 non-members
+Total samples in ground truth: 50000
+Evaluating all attacks...
+shokri: {'auc': 0.51070015875, 'tpr_at_fpr_0.01': 0.010925, 'tpr_at_fpr_0.001': 0.0007, 'accuracy': 0.38088}
+lira: {'auc': 0.35360118999999995, 'tpr_at_fpr_0.01': 0.0078, 'tpr_at_fpr_0.001': 0.000675, 'accuracy': 0.20002}
+
+Attack Performance:
+
+shokri:
+  auc: 0.5107
+  tpr_at_fpr_0.01: 0.0109
+  tpr_at_fpr_0.001: 0.0007
+  accuracy: 0.3809
+
+lira:
+  auc: 0.3536
+  tpr_at_fpr_0.01: 0.0078
+  tpr_at_fpr_0.001: 0.0007
+  accuracy: 0.2000
+
+================================================================================
+SAVING RESULTS
+================================================================================
+Saving results to ./results/mia_disparity...
+Results saved to ./results/mia_disparity
+Evaluating all attacks...
+shokri: {'auc': 0.51070015875, 'tpr_at_fpr_0.01': 0.010925, 'tpr_at_fpr_0.001': 0.0007, 'accuracy': 0.38088}
+lira: {'auc': 0.35360118999999995, 'tpr_at_fpr_0.01': 0.0078, 'tpr_at_fpr_0.001': 0.000675, 'accuracy': 0.20002}
+
+================================================================================
+MEMBERSHIP INFERENCE ATTACK EVALUATION REPORT
+================================================================================
+Dataset: cifar10
+Model: resnet18
+Unlearning Method: scrub
+Date: 2026-02-19T05:13:50
+
+INDIVIDUAL ATTACK RESULTS:
+--------------------------------------------------------------------------------
+
+shokri:
+  auc: 0.5107
+  tpr_at_fpr_0.01: 0.0109
+  tpr_at_fpr_0.001: 0.0007
+  accuracy: 0.3809
+
+lira:
+  auc: 0.3536
+  tpr_at_fpr_0.01: 0.0078
+  tpr_at_fpr_0.001: 0.0007
+  accuracy: 0.2000
+
+================================================================================
+Report saved to: ./results/mia_disparity/evaluation_report.txt
+
+================================================================================
+ENSEMBLE RESULTS
+================================================================================
+
+Union (OR) Ensemble:
+  auc: 0.5107
+  tpr_at_fpr_0.01: 0.0109
+  tpr_at_fpr_0.001: 0.0007
+  accuracy: 0.3809
+
+Voting (k=2) Ensemble:
+  auc: 0.3536
+  tpr_at_fpr_0.01: 0.0078
+  tpr_at_fpr_0.001: 0.0007
+  accuracy: 0.2000
+
+================================================================================
+EXPERIMENT COMPLETE
+================================================================================

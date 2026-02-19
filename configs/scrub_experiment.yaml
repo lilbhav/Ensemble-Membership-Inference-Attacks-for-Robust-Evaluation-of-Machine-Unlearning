@@ -14,6 +14,7 @@ dataset: cifar10
 dataroot: ./data/raw
 forget_fraction: 0.2
 seed: 42
+split_dir: ./data/splits
 
 check_path: /content/gdrive/My Drive/mia_checkpoints/scrub_unlearned_model.pt
 results_path: ./results/scrub_unlearned_model/results.txt

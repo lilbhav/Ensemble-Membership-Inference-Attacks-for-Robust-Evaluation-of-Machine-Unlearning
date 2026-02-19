@@ -15,6 +15,7 @@ import sys
 import yaml
 import logging
 import argparse
+import random
 import torch
 import numpy as np
 from typing import Dict, Any, Optional, List
@@ -23,7 +24,7 @@ from torch.utils.data import DataLoader
 # Add paths
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from mia.mia_runner import MIARunner, MIARunnerConfig, AttackConfig
+from mia.mia_runner import MIARunner, MIARunnerConfig, AttackConfig, AttackResult
 from mia.attack_integrations import AttackFactory
 from data.loaders import load_dataset, get_num_classes
 from utils.splits import create_retain_forget_split, load_split
@@ -62,6 +63,36 @@ def setup_logging(log_dir: str, experiment_name: str) -> logging.Logger:
     logger.addHandler(ch)
     
     return logger
+
+
+def _get_seed(config: Dict[str, Any]) -> int:
+    """Get experiment seed from nested or flat config formats."""
+    experiment_cfg = config.get('experiment', {})
+    return int(experiment_cfg.get('seed', config.get('seed', 42)))
+
+
+def _set_global_determinism(seed: int) -> None:
+    """Set deterministic seeds for reproducible splits and dataloading."""
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+    if hasattr(torch.backends, "cudnn"):
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+
+
+def _get_split_dir(config: Dict[str, Any]) -> str:
+    """Resolve retain/forget split directory from config.
+
+    Priority:
+      1) top-level split_dir
+      2) dataset.split_dir
+      3) ./data/splits
+    """
+    dataset_cfg = config.get('dataset', {}) if isinstance(config.get('dataset', {}), dict) else {}
+    return str(config.get('split_dir') or dataset_cfg.get('split_dir') or "./data/splits")
 
 
 def create_model(architecture: str, dataset_name: str, device: str) -> torch.nn.Module:
@@ -131,23 +162,39 @@ def prepare_data(config: Dict[str, Any]) -> tuple:
     dataset_name = dataset_cfg['name']
     forget_fraction = dataset_cfg.get('forget_fraction', 0.2)
     batch_size = config.get('batch_size', 64)
+    seed = _get_seed(config)
+    split_dir = _get_split_dir(config)
     
     # Load dataset - load_dataset() returns single dataset, not tuple
     train_data = load_dataset(dataset_name, train=True)
     test_data = load_dataset(dataset_name, train=False)
     
     # Try to load existing splits first (from SCRUB unlearning)
-    split_dir = "./data/splits"
     if os.path.exists(os.path.join(split_dir, "forget_idx.npy")) and os.path.exists(os.path.join(split_dir, "retain_idx.npy")):
-        logger.info("Loading existing retain/forget splits from disk...")
+        logger.info(f"Loading existing retain/forget splits from disk ({split_dir})...")
         retain_data, forget_data = load_split(train_data, split_dir)
+
+        expected_forget = int(len(train_data) * forget_fraction)
+        expected_retain = len(train_data) - expected_forget
+        if len(forget_data) != expected_forget or len(retain_data) != expected_retain:
+            logger.warning(
+                "Existing split sizes do not match config forget_fraction. "
+                f"Expected retain/forget = {expected_retain}/{expected_forget}, "
+                f"got {len(retain_data)}/{len(forget_data)}. Recreating split for consistency."
+            )
+            retain_data, forget_data = create_retain_forget_split(
+                train_data,
+                forget_fraction=forget_fraction,
+                seed=seed,
+                save_dir=split_dir
+            )
     else:
         # Create new split if doesn't exist
-        logger.info("Creating retain/forget splits...")
+        logger.info(f"Creating retain/forget splits in {split_dir}...")
         member_data, forget_data = create_retain_forget_split(
             train_data,
             forget_fraction=forget_fraction,
-            seed=config.get('seed', 42),
+            seed=seed,
             save_dir=split_dir
         )
         retain_data = member_data
@@ -173,19 +220,26 @@ def create_attack_configs(config: Dict[str, Any],
     
     mia_cfg = config.get('mia', {})
     attack_defs = mia_cfg.get('attacks', [])
+    attack_defs_by_name = {
+        attack_def.get('name', '').lower(): attack_def
+        for attack_def in attack_defs
+        if isinstance(attack_def, dict) and attack_def.get('name')
+    }
     
     if override_attacks:
-        # Command-line override: just names, use defaults
+        # Command-line override: keep configured params/model_access when available
         logger.info(f"Using command-line attack override: {override_attacks}")
-        attack_configs = [
-            AttackConfig(
-                name=attack,
-                model_access="white_box",
-                params={},
-                seed=config.get('seed', 42)
+        attack_configs = []
+        for attack in override_attacks:
+            configured = attack_defs_by_name.get(attack.lower(), {})
+            attack_configs.append(
+                AttackConfig(
+                    name=attack,
+                    model_access=configured.get('model_access', 'white_box'),
+                    params=configured.get('params', {}),
+                    seed=_get_seed(config)
+                )
             )
-            for attack in override_attacks
-        ]
     else:
         # Use attacks from config file
         attack_configs = [
@@ -193,7 +247,7 @@ def create_attack_configs(config: Dict[str, Any],
                 name=attack_def['name'],
                 model_access=attack_def.get('model_access', 'white_box'),
                 params=attack_def.get('params', {}),
-                seed=config.get('seed', 42)
+                seed=_get_seed(config)
             )
             for attack_def in attack_defs
         ]
@@ -221,6 +275,8 @@ def run_mia_experiment(config_path: str,
     
     # Load config
     config = load_config(config_path)
+    seed = _get_seed(config)
+    _set_global_determinism(seed)
     experiment_name = config.get('experiment', {}).get('name', 'mia_experiment')
     
     # Setup logging
@@ -234,6 +290,8 @@ def run_mia_experiment(config_path: str,
     # Device
     device = torch.device(config.get('experiment', {}).get('device', 'cuda'))
     logger.info(f"Device: {device}")
+    logger.info(f"Seed: {seed}")
+    logger.info(f"Split directory: {_get_split_dir(config)}")
     
     # Prepare data
     member_loader, nonmember_loader, member_data, test_data = prepare_data(config)
@@ -257,7 +315,7 @@ def run_mia_experiment(config_path: str,
         unlearning_method=config.get('unlearning', {}).get('method', 'unknown'),
         attacks=attack_configs,
         device=device,
-        seed=config.get('seed', 42),
+        seed=seed,
         output_dir=output_path,
         log_dir=log_dir,
     )
@@ -341,9 +399,15 @@ def run_mia_experiment(config_path: str,
         
         # Union ensemble
         union_pred, _ = runner.get_ensemble_predictions_union()
-        temp_result = list(runner.attack_results.values())[0]
-        temp_result.all_predictions = union_pred
-        union_metrics = temp_result.compute_metrics(ground_truth)
+        union_result = AttackResult(
+            attack_name="union_ensemble",
+            attack_config=AttackConfig(name="union_ensemble"),
+            member_scores=union_pred[:num_members].astype(float),
+            nonmember_scores=union_pred[num_members:].astype(float),
+            all_predictions=union_pred,
+            member_indices=np.arange(num_members),
+        )
+        union_metrics = union_result.compute_metrics(ground_truth)
         
         logger.info("\nUnion (OR) Ensemble:")
         for metric_name, metric_value in union_metrics.items():
@@ -351,9 +415,15 @@ def run_mia_experiment(config_path: str,
         
         # Voting ensemble
         voting_pred, _ = runner.get_ensemble_predictions_voting(k=2)
-        temp_result2 = list(runner.attack_results.values())[1]
-        temp_result2.all_predictions = voting_pred
-        voting_metrics = temp_result2.compute_metrics(ground_truth)
+        voting_result = AttackResult(
+            attack_name="voting_ensemble",
+            attack_config=AttackConfig(name="voting_ensemble"),
+            member_scores=voting_pred[:num_members].astype(float),
+            nonmember_scores=voting_pred[num_members:].astype(float),
+            all_predictions=voting_pred,
+            member_indices=np.arange(num_members),
+        )
+        voting_metrics = voting_result.compute_metrics(ground_truth)
         
         logger.info("\nVoting (k=2) Ensemble:")
         for metric_name, metric_value in voting_metrics.items():

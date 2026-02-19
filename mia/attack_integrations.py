@@ -16,7 +16,7 @@ from pathlib import Path
 import numpy as np
 import torch
 import torch.nn as nn
-from torch.utils.data import DataLoader, Dataset, TensorDataset
+from torch.utils.data import DataLoader, Dataset, TensorDataset, ConcatDataset
 
 # Add reference code to path for direct imports
 _REF_CODE_PATH = os.path.join(
@@ -80,6 +80,26 @@ class ReferenceAttackWrapper:
         """
         self.logger = logging.getLogger(__name__)
         self.logging_enabled = logging_enabled
+
+    @staticmethod
+    def _predictions_by_member_prior(
+        member_scores: np.ndarray,
+        nonmember_scores: np.ndarray,
+    ) -> np.ndarray:
+        """Create binary predictions using score ranking and known member prior."""
+        member_scores = np.asarray(member_scores, dtype=float)
+        nonmember_scores = np.asarray(nonmember_scores, dtype=float)
+
+        all_scores = np.concatenate([member_scores, nonmember_scores])
+        num_members = len(member_scores)
+
+        predictions = np.zeros(len(all_scores), dtype=int)
+        if num_members <= 0:
+            return predictions
+
+        ranked_desc = np.argsort(all_scores)[::-1]
+        predictions[ranked_desc[:num_members]] = 1
+        return predictions
 
     def run_shokri_attack(
         self,
@@ -426,20 +446,17 @@ class ReferenceAttackWrapper:
             attack = LiraAttack(target_model_access=model_access, auxiliary_info=aux_info)
             attack.prepare(train_dataset)
 
-            # Get membership scores
+            # Get membership scores in one pass to keep score calibration consistent
             self.logger.info("Inferring membership...")
-            member_scores = attack.infer(train_dataset)
-            nonmember_scores = attack.infer(test_dataset)
+            infer_dataset = ConcatDataset([train_dataset, test_dataset])
+            all_scores = np.asarray(attack.infer(infer_dataset), dtype=float)
 
-            # Clip to [0, 1] and normalize
-            member_scores = np.clip(member_scores, 0, 1)
-            nonmember_scores = np.clip(nonmember_scores, 0, 1)
+            num_train = len(train_dataset)
+            member_scores = all_scores[:num_train]
+            nonmember_scores = all_scores[num_train:]
 
-            # Create predictions
-            all_predictions = np.concatenate([
-                (member_scores > 0.5).astype(int),
-                (nonmember_scores > 0.5).astype(int)
-            ])
+            # Create predictions without assuming score range; use known member prior
+            all_predictions = self._predictions_by_member_prior(member_scores, nonmember_scores)
 
             self.logger.info(
                 f"LIRA attack complete. "
