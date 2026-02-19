@@ -189,6 +189,12 @@ class ReferenceAttackWrapper:
                 access_type=ModelAccessType.BLACK_BOX
             )
 
+            # Register safe globals for PyTorch 2.6+ weights_only loading
+            try:
+                torch.serialization.add_safe_globals([AttackTrainingSet])
+            except Exception:
+                pass
+
             # Run attack with safe globals context for PyTorch 2.6
             self.logger.info("Preparing Shokri attack (training shadow models)...")
             attack = ShokriAttack(target_model_access=model_access, auxiliary_info=aux_info)
@@ -200,6 +206,27 @@ class ReferenceAttackWrapper:
             except TypeError:
                 # Fallback if safe_globals doesn't support context manager
                 attack.prepare(train_dataset)
+            except Exception as prepare_error:
+                # PyTorch 2.6+ may still block custom pickled objects depending on backend
+                # and internal load path. Since this artifact is generated in-run by trusted
+                # code, use explicit trusted fallback via weights_only=False.
+                if "Weights only load failed" in str(prepare_error):
+                    self.logger.warning(
+                        "Shokri prepare hit PyTorch safe-load guard; retrying with trusted weights_only=False fallback."
+                    )
+                    original_torch_load = torch.load
+
+                    def _trusted_load(*args, **kwargs):
+                        kwargs.setdefault("weights_only", False)
+                        return original_torch_load(*args, **kwargs)
+
+                    torch.load = _trusted_load
+                    try:
+                        attack.prepare(train_dataset)
+                    finally:
+                        torch.load = original_torch_load
+                else:
+                    raise
 
             # Get membership scores with safe globals context
             self.logger.info("Inferring membership...")

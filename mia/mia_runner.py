@@ -17,6 +17,7 @@ import os
 import json
 import logging
 import pickle
+from datetime import datetime
 from typing import Dict, List, Tuple, Optional, Any
 from dataclasses import dataclass, asdict, field
 from abc import ABC, abstractmethod
@@ -103,7 +104,9 @@ class AttackResult:
             return {}
 
         # Combine all scores for AUC calculation
-        all_scores = np.concatenate([self.nonmember_scores, self.member_scores])
+        # Order must match ground_truth_labels construction in run_mia_experiment:
+        # [members, non-members]
+        all_scores = np.concatenate([self.member_scores, self.nonmember_scores])
 
         # Compute AUC
         auc = roc_auc_score(ground_truth_labels, all_scores)
@@ -469,7 +472,7 @@ class MIARunner:
         report.append(f"Dataset: {self.config.dataset_name}")
         report.append(f"Model: {self.config.model_architecture}")
         report.append(f"Unlearning Method: {self.config.unlearning_method}")
-        report.append(f"Date: {str(Path(self.config.output_dir).exists())}")
+        report.append(f"Date: {datetime.now().isoformat(timespec='seconds')}")
         report.append("")
 
         report.append("INDIVIDUAL ATTACK RESULTS:")
