@@ -10,6 +10,7 @@ import sys
 import logging
 import copy
 import tempfile
+import inspect
 from typing import Dict, Optional, Tuple, Any
 from pathlib import Path
 
@@ -800,6 +801,38 @@ class AttackFactory:
         self.wrapper = ReferenceAttackWrapper()
         self.logger = logging.getLogger(__name__)
 
+    def _prepare_params(self, attack_name: str, params: Optional[Dict[str, Any]], method) -> Dict[str, Any]:
+        """Normalize config params for wrapper methods and drop unsupported kwargs."""
+        params = dict(params or {})
+
+        alias_maps = {
+            "shokri": {
+                "epochs": "num_epochs",
+            },
+            "lira": {
+                "epochs": "num_epochs",
+            },
+            "augmentation": {
+                "num_augmentations": "augment_kwarg",
+            },
+        }
+
+        for source_key, target_key in alias_maps.get(attack_name, {}).items():
+            if source_key in params and target_key not in params:
+                params[target_key] = params.pop(source_key)
+
+        supported_keys = set(inspect.signature(method).parameters.keys())
+        filtered_params = {
+            key: value for key, value in params.items() if key in supported_keys
+        }
+        dropped_keys = sorted(set(params.keys()) - set(filtered_params.keys()))
+        if dropped_keys:
+            self.logger.warning(
+                f"Ignoring unsupported params for {attack_name}: {dropped_keys}"
+            )
+
+        return filtered_params
+
     def create_attack(
         self,
         attack_config: AttackConfig,
@@ -826,67 +859,102 @@ class AttackFactory:
         self.logger.info(f"Creating attack: {attack_name}")
 
         if attack_name == "shokri":
+            attack_params = self._prepare_params(
+                attack_name,
+                attack_config.params,
+                self.wrapper.run_shokri_attack,
+            )
             member_scores, nonmember_scores, predictions = self.wrapper.run_shokri_attack(
                 target_model=target_model,
                 train_dataloader=train_dataloader,
                 test_dataloader=test_dataloader,
                 device=device,
-                **attack_config.params
+                **attack_params
             )
 
         elif attack_name == "yeom":
+            attack_params = self._prepare_params(
+                attack_name,
+                attack_config.params,
+                self.wrapper.run_yeom_attack,
+            )
             member_scores, nonmember_scores, predictions = self.wrapper.run_yeom_attack(
                 target_model=target_model,
                 train_dataloader=train_dataloader,
                 test_dataloader=test_dataloader,
                 device=device,
-                **attack_config.params
+                **attack_params
             )
 
         elif attack_name == "lira":
+            attack_params = self._prepare_params(
+                attack_name,
+                attack_config.params,
+                self.wrapper.run_lira_attack,
+            )
             member_scores, nonmember_scores, predictions = self.wrapper.run_lira_attack(
                 target_model=target_model,
                 train_dataloader=train_dataloader,
                 test_dataloader=test_dataloader,
                 device=device,
-                **attack_config.params
+                **attack_params
             )
 
         elif attack_name == "reference":
+            attack_params = self._prepare_params(
+                attack_name,
+                attack_config.params,
+                self.wrapper.run_reference_attack,
+            )
             member_scores, nonmember_scores, predictions = self.wrapper.run_reference_attack(
                 target_model=target_model,
                 reference_models=[],  # Would be provided in real scenario
                 train_dataloader=train_dataloader,
                 test_dataloader=test_dataloader,
                 device=device,
-                **attack_config.params
+                **attack_params
             )
 
         elif attack_name == "losstraj":
+            attack_params = self._prepare_params(
+                attack_name,
+                attack_config.params,
+                self.wrapper.run_losstraj_attack,
+            )
             member_scores, nonmember_scores, predictions = self.wrapper.run_losstraj_attack(
                 target_model=target_model,
                 train_dataloader=train_dataloader,
                 test_dataloader=test_dataloader,
                 device=device,
-                **attack_config.params
+                **attack_params
             )
 
         elif attack_name == "calibration":
+            attack_params = self._prepare_params(
+                attack_name,
+                attack_config.params,
+                self.wrapper.run_calibration_attack,
+            )
             member_scores, nonmember_scores, predictions = self.wrapper.run_calibration_attack(
                 target_model=target_model,
                 train_dataloader=train_dataloader,
                 test_dataloader=test_dataloader,
                 device=device,
-                **attack_config.params
+                **attack_params
             )
 
         elif attack_name == "augmentation":
+            attack_params = self._prepare_params(
+                attack_name,
+                attack_config.params,
+                self.wrapper.run_augmentation_attack,
+            )
             member_scores, nonmember_scores, predictions = self.wrapper.run_augmentation_attack(
                 target_model=target_model,
                 train_dataloader=train_dataloader,
                 test_dataloader=test_dataloader,
                 device=device,
-                **attack_config.params
+                **attack_params
             )
 
         else:
