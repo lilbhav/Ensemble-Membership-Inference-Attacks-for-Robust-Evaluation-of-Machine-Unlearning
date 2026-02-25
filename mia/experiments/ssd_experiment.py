@@ -116,6 +116,7 @@ def ssd(loaders: Dict[str, DataLoader], args: SSDInput):
     train_retain_loader = loaders["train_retain_loader"]
     valid_forget_loader = loaders["valid_forget_loader"]
     valid_retain_loader = loaders["valid_retain_loader"]
+    test_loader = loaders["test_loader"]
 
     parameters = {
         "lower_bound": 1,
@@ -143,14 +144,17 @@ def ssd(loaders: Dict[str, DataLoader], args: SSDInput):
         valid_forget_loader,
         device,
     )
+    baseline_test_acc = compute_accuracy(model, test_loader, device)
     print(
         "Baseline retain acc - train: {:.4f}, valid: {:.4f}".format(
             baseline_acc["tr_acc"], baseline_acc["vr_acc"]
         )
     )
+    print(f"Baseline test acc: {baseline_test_acc:.4f}")
     if args.print_accuracies:
         line = log_accuracies(args.results_path, "baseline", baseline_acc)
         print(f"   {line}")
+        print(f"   baseline | test_acc: {baseline_test_acc:.4f}")
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
     pdr = ssd_file.ParameterPerturber(model, optimizer, device, parameters)
 
@@ -169,10 +173,13 @@ def ssd(loaders: Dict[str, DataLoader], args: SSDInput):
         valid_forget_loader,
         device,
     )
+    after_test_acc = compute_accuracy(model, test_loader, device)
+    acc_dict["test_acc"] = after_test_acc
 
     if args.print_accuracies:
         line = log_accuracies(args.results_path, "after_ssd", acc_dict)
         print(f"   {line}")
+        print(f"   after_ssd | test_acc: {after_test_acc:.4f}")
 
     if args.check_path is not None:
         check_dir = os.path.dirname(args.check_path)
@@ -189,6 +196,7 @@ def _wrap_dataset(dataset: Dataset) -> Dataset:
 
 def _create_loaders(args: SSDInput):
     dataset = load_dataset(dataset_name=args.dataset, root=args.dataroot, train=True)
+    test_dataset = load_dataset(dataset_name=args.dataset, root=args.dataroot, train=False)
 
     split_dir = args.split_dir
     forget_idx_path = os.path.join(split_dir, "forget_idx.npy")
@@ -257,6 +265,13 @@ def _create_loaders(args: SSDInput):
             num_workers=args.num_workers,
             pin_memory=pin_memory,
         ),
+        "test_loader": DataLoader(
+            _wrap_dataset(test_dataset),
+            batch_size=args.batch_size,
+            shuffle=False,
+            num_workers=args.num_workers,
+            pin_memory=pin_memory,
+        ),
     }
 
     return loaders
@@ -297,6 +312,8 @@ def main():
         print(f"   tf_acc: {acc_dict['tf_acc']:.4f}")
         print(f"   vr_acc: {acc_dict['vr_acc']:.4f}")
         print(f"   vf_acc: {acc_dict['vf_acc']:.4f}")
+        if "test_acc" in acc_dict:
+            print(f"   test_acc: {acc_dict['test_acc']:.4f}")
 
     return model, acc_dict
 
