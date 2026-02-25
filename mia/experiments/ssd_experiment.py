@@ -49,6 +49,7 @@ class SSDInput:
     selection_weighting: float
     eval_every: int
     print_accuracies: bool
+    split_dir: str = "./data/splits"
     device: Optional[str] = None
     results_path: Optional[str] = None
 
@@ -189,7 +190,7 @@ def _wrap_dataset(dataset: Dataset) -> Dataset:
 def _create_loaders(args: SSDInput):
     dataset = load_dataset(dataset_name=args.dataset, root=args.dataroot, train=True)
 
-    split_dir = "./data/splits"
+    split_dir = args.split_dir
     forget_idx_path = os.path.join(split_dir, "forget_idx.npy")
     retain_idx_path = os.path.join(split_dir, "retain_idx.npy")
 
