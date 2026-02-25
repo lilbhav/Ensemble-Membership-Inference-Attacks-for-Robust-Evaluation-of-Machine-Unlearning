@@ -22,7 +22,7 @@ def train_resnet18_cifar10(
     num_epochs=5,
     batch_size=128,
     learning_rate=0.1,
-    output_checkpoint="./models/pretrained_cifar10.pt"
+    output_checkpoint="/content/gdrive/My Drive/mia_checkpoints/pretrained_cifar10.pt"
 ):
     """
     Train ResNet-18 on CIFAR-10 and save checkpoint.
@@ -155,5 +155,5 @@ if __name__ == "__main__":
         num_epochs=25,
         batch_size=256,
         learning_rate=0.1,
-        output_checkpoint="./models/pretrained_cifar10.pt"
+        output_checkpoint="/content/gdrive/My Drive/mia_checkpoints/pretrained_cifar10.pt",
     )
