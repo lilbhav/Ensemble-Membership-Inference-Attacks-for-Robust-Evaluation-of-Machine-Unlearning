@@ -2,15 +2,15 @@ dataset: cifar10
 dataroot: "./data/raw"
 forget_fraction: 0.2
 seed: 42
-batch_size: 256
+batch_size: 128
 num_workers: 2
 pin_memory: true
 model_path: "./models/pretrained_cifar10.pt"
-check_path: "./results/ssd_unlearned_model/ssd_unlearned_model.pt"
-results_path: "./results/ssd_unlearned_model/results.txt"
-learning_rate: 0.0001
-dampening_constant: 5.0
-selection_weighting: 50.0
+check_path: "/content/gdrive/My Drive/mia_checkpoints/ssd_unlearned_model.pt"
+results_path: "/content/gdrive/My Drive/mia_checkpoints/ssd_results.txt"
+learning_rate: 0.1
+dampening_constant: 1.0
+selection_weighting: 10.0
 eval_every: 1
 print_accuracies: true
 device: null

@@ -1,0 +1,210 @@
+MIA EXPERIMENT: mia_disparity_cifar10
+================================================================================
+Device: cuda
+Seed: 42
+Split directory: ./data/splits
+Loading dataset...
+100% 170M/170M [00:13<00:00, 13.1MB/s]
+Creating retain/forget splits in ./data/splits...
+Dataset: cifar10
+  Training samples: 50000
+  Test samples: 10000
+  Forget set: 10000 (20%)
+  Retain set (members): 40000 (80%)
+Loading unlearned model from /content/gdrive/My Drive/mia_checkpoints/scrub_unlearned_model.pt
+Checkpoint is a state_dict; creating model and loading weights...
+/usr/local/lib/python3.12/dist-packages/torchvision/models/_utils.py:208: UserWarning: The parameter 'pretrained' is deprecated since 0.13 and may be removed in the future, please use 'weights' instead.
+  warnings.warn(
+/usr/local/lib/python3.12/dist-packages/torchvision/models/_utils.py:223: UserWarning: Arguments other than a weight enum or `None` for 'weights' are deprecated since 0.13 and may be removed in the future. The current behavior is equivalent to passing `weights=None`.
+  warnings.warn(msg)
+Using command-line attack override: ['shokri']
+Attacks to run: ['shokri']
+Output directory: ./results/mia_disparity
+
+================================================================================
+EXECUTING MIA ATTACKS
+================================================================================
+MIA Runner initialized for cifar10
+Unlearning method: scrub
+Model architecture: resnet18
+
+[1/1] Running shokri...
+Start preparing the attack...
+Shadow dataset[0] size: 4000
+Training shadow model 1/10...
+  0% 0/50 [00:00<?, ?it/s]Epoch 0, train_acc: 70.05%, test_acc: 63.35%, Loss:69.4016, lr: 0.0100
+ 40% 20/50 [00:13<00:17,  1.70it/s]Epoch 20, train_acc: 100.00%, test_acc: 59.40%, Loss:0.6091, lr: 0.0062
+ 80% 40/50 [00:25<00:05,  1.68it/s]Epoch 40, train_acc: 100.00%, test_acc: 59.60%, Loss:0.1391, lr: 0.0008
+ 98% 49/50 [00:31<00:00,  1.69it/s]Epoch 49, train_acc: 100.00%, test_acc: 59.80%, Loss:0.1627, lr: 0.0000
+100% 50/50 [00:32<00:00,  1.54it/s]
+Training shadow model 2/10...
+  0% 0/50 [00:00<?, ?it/s]Epoch 0, train_acc: 66.10%, test_acc: 62.65%, Loss:69.5379, lr: 0.0100
+ 40% 20/50 [00:12<00:17,  1.71it/s]Epoch 20, train_acc: 100.00%, test_acc: 62.35%, Loss:0.8269, lr: 0.0062
+ 80% 40/50 [00:24<00:05,  1.71it/s]Epoch 40, train_acc: 100.00%, test_acc: 62.00%, Loss:0.1330, lr: 0.0008
+ 98% 49/50 [00:30<00:00,  1.66it/s]Epoch 49, train_acc: 100.00%, test_acc: 61.90%, Loss:0.2723, lr: 0.0000
+100% 50/50 [00:31<00:00,  1.60it/s]
+Training shadow model 3/10...
+  0% 0/50 [00:00<?, ?it/s]Epoch 0, train_acc: 68.05%, test_acc: 59.05%, Loss:68.2213, lr: 0.0100
+ 40% 20/50 [00:12<00:17,  1.69it/s]Epoch 20, train_acc: 100.00%, test_acc: 57.50%, Loss:0.9187, lr: 0.0062
+ 80% 40/50 [00:24<00:05,  1.70it/s]Epoch 40, train_acc: 100.00%, test_acc: 57.50%, Loss:0.1580, lr: 0.0008
+ 98% 49/50 [00:30<00:00,  1.68it/s]Epoch 49, train_acc: 100.00%, test_acc: 58.00%, Loss:0.1466, lr: 0.0000
+100% 50/50 [00:31<00:00,  1.60it/s]
+Training shadow model 4/10...
+  0% 0/50 [00:00<?, ?it/s]Epoch 0, train_acc: 68.85%, test_acc: 64.25%, Loss:70.5787, lr: 0.0100
+ 40% 20/50 [00:12<00:18,  1.66it/s]Epoch 20, train_acc: 99.95%, test_acc: 58.90%, Loss:0.9844, lr: 0.0062
+ 80% 40/50 [00:24<00:05,  1.70it/s]Epoch 40, train_acc: 100.00%, test_acc: 60.10%, Loss:0.1315, lr: 0.0008
+ 98% 49/50 [00:30<00:00,  1.65it/s]Epoch 49, train_acc: 100.00%, test_acc: 60.45%, Loss:0.1330, lr: 0.0000
+100% 50/50 [00:31<00:00,  1.59it/s]
+Training shadow model 5/10...
+  0% 0/50 [00:00<?, ?it/s]Epoch 0, train_acc: 68.05%, test_acc: 62.90%, Loss:69.8777, lr: 0.0100
+ 40% 20/50 [00:12<00:17,  1.68it/s]Epoch 20, train_acc: 100.00%, test_acc: 58.60%, Loss:0.4503, lr: 0.0062
+ 80% 40/50 [00:24<00:05,  1.69it/s]Epoch 40, train_acc: 100.00%, test_acc: 58.30%, Loss:0.1254, lr: 0.0008
+ 98% 49/50 [00:30<00:00,  1.61it/s]Epoch 49, train_acc: 100.00%, test_acc: 58.35%, Loss:0.1294, lr: 0.0000
+100% 50/50 [00:31<00:00,  1.58it/s]
+Training shadow model 6/10...
+  0% 0/50 [00:00<?, ?it/s]Epoch 0, train_acc: 68.35%, test_acc: 60.35%, Loss:69.4935, lr: 0.0100
+ 40% 20/50 [00:12<00:18,  1.67it/s]Epoch 20, train_acc: 100.00%, test_acc: 58.45%, Loss:1.2098, lr: 0.0062
+ 80% 40/50 [00:24<00:06,  1.66it/s]Epoch 40, train_acc: 100.00%, test_acc: 58.00%, Loss:0.1498, lr: 0.0008
+ 98% 49/50 [00:30<00:00,  1.67it/s]Epoch 49, train_acc: 100.00%, test_acc: 58.15%, Loss:0.1460, lr: 0.0000
+100% 50/50 [00:31<00:00,  1.59it/s]
+Training shadow model 7/10...
+  0% 0/50 [00:00<?, ?it/s]Epoch 0, train_acc: 67.95%, test_acc: 63.75%, Loss:70.1014, lr: 0.0100
+ 40% 20/50 [00:12<00:17,  1.69it/s]Epoch 20, train_acc: 100.00%, test_acc: 58.85%, Loss:0.3858, lr: 0.0062
+ 80% 40/50 [00:24<00:05,  1.68it/s]Epoch 40, train_acc: 100.00%, test_acc: 58.60%, Loss:0.1382, lr: 0.0008
+ 98% 49/50 [00:30<00:00,  1.65it/s]Epoch 49, train_acc: 100.00%, test_acc: 58.40%, Loss:0.1357, lr: 0.0000
+100% 50/50 [00:31<00:00,  1.59it/s]
+Training shadow model 8/10...
+  0% 0/50 [00:00<?, ?it/s]Epoch 0, train_acc: 70.65%, test_acc: 62.05%, Loss:66.1995, lr: 0.0100
+ 40% 20/50 [00:12<00:18,  1.66it/s]Epoch 20, train_acc: 100.00%, test_acc: 57.00%, Loss:0.5097, lr: 0.0062
+ 80% 40/50 [00:24<00:05,  1.67it/s]Epoch 40, train_acc: 100.00%, test_acc: 57.95%, Loss:0.1344, lr: 0.0008
+ 98% 49/50 [00:30<00:00,  1.67it/s]Epoch 49, train_acc: 100.00%, test_acc: 58.45%, Loss:0.1215, lr: 0.0000
+100% 50/50 [00:31<00:00,  1.58it/s]
+Training shadow model 9/10...
+  0% 0/50 [00:00<?, ?it/s]Epoch 0, train_acc: 68.85%, test_acc: 60.85%, Loss:68.0488, lr: 0.0100
+ 40% 20/50 [00:12<00:18,  1.65it/s]Epoch 20, train_acc: 99.95%, test_acc: 57.85%, Loss:0.6016, lr: 0.0062
+ 80% 40/50 [00:24<00:06,  1.65it/s]Epoch 40, train_acc: 100.00%, test_acc: 59.15%, Loss:0.1351, lr: 0.0008
+ 98% 49/50 [00:30<00:00,  1.66it/s]Epoch 49, train_acc: 100.00%, test_acc: 59.15%, Loss:0.1151, lr: 0.0000
+100% 50/50 [00:31<00:00,  1.59it/s]
+Training shadow model 10/10...
+  0% 0/50 [00:00<?, ?it/s]Epoch 0, train_acc: 68.40%, test_acc: 62.50%, Loss:70.4810, lr: 0.0100
+ 40% 20/50 [00:12<00:17,  1.69it/s]Epoch 20, train_acc: 100.00%, test_acc: 56.60%, Loss:1.3407, lr: 0.0062
+ 80% 40/50 [00:24<00:05,  1.69it/s]Epoch 40, train_acc: 100.00%, test_acc: 57.65%, Loss:0.1495, lr: 0.0008
+ 98% 49/50 [00:30<00:00,  1.66it/s]Epoch 49, train_acc: 100.00%, test_acc: 57.25%, Loss:0.1471, lr: 0.0000
+100% 50/50 [00:31<00:00,  1.59it/s]
+Shokri prepare hit PyTorch safe-load guard; retrying with trusted weights_only=False fallback.
+Start preparing the attack...
+Shadow dataset[0] size: 4000
+Training attack model for 0/10 label "0" ...
+  0% 0/50 [00:00<?, ?it/s]Epoch: 0, train_acc: 85.10%, Loss: 65.0193
+ 40% 20/50 [00:04<00:06,  4.60it/s]Epoch: 20, train_acc: 87.48%, Loss: 55.7580
+ 80% 40/50 [00:08<00:02,  4.50it/s]Epoch: 40, train_acc: 88.25%, Loss: 54.8301
+ 98% 49/50 [00:11<00:00,  4.55it/s]Epoch: 49, train_acc: 88.65%, Loss: 54.4845
+100% 50/50 [00:11<00:00,  4.41it/s]
+Training attack model for 1/10 label "1" ...
+  0% 0/50 [00:00<?, ?it/s]Epoch: 0, train_acc: 79.93%, Loss: 72.1260
+ 40% 20/50 [00:04<00:06,  4.50it/s]Epoch: 20, train_acc: 83.04%, Loss: 60.9654
+ 80% 40/50 [00:09<00:02,  4.56it/s]Epoch: 40, train_acc: 83.66%, Loss: 59.7963
+ 98% 49/50 [00:11<00:00,  4.28it/s]Epoch: 49, train_acc: 84.31%, Loss: 59.2934
+100% 50/50 [00:11<00:00,  4.35it/s]
+Training attack model for 2/10 label "2" ...
+  0% 0/50 [00:00<?, ?it/s]Epoch: 0, train_acc: 85.47%, Loss: 59.4639
+ 40% 20/50 [00:04<00:06,  4.61it/s]Epoch: 20, train_acc: 94.08%, Loss: 47.2712
+ 80% 40/50 [00:08<00:02,  4.61it/s]Epoch: 40, train_acc: 94.38%, Loss: 46.1877
+ 98% 49/50 [00:11<00:00,  4.26it/s]Epoch: 49, train_acc: 91.76%, Loss: 46.0126
+100% 50/50 [00:11<00:00,  4.37it/s]
+Training attack model for 3/10 label "3" ...
+  0% 0/50 [00:00<?, ?it/s]Epoch: 0, train_acc: 94.72%, Loss: 54.5979
+ 40% 20/50 [00:04<00:06,  4.61it/s]Epoch: 20, train_acc: 96.93%, Loss: 43.1814
+ 80% 40/50 [00:09<00:02,  4.36it/s]Epoch: 40, train_acc: 97.16%, Loss: 43.0649
+ 98% 49/50 [00:11<00:00,  4.40it/s]Epoch: 49, train_acc: 97.59%, Loss: 42.8704
+100% 50/50 [00:11<00:00,  4.36it/s]
+Training attack model for 4/10 label "4" ...
+  0% 0/50 [00:00<?, ?it/s]Epoch: 0, train_acc: 85.35%, Loss: 62.8834
+ 40% 20/50 [00:04<00:06,  4.42it/s]Epoch: 20, train_acc: 89.45%, Loss: 49.1024
+ 80% 40/50 [00:09<00:02,  4.41it/s]Epoch: 40, train_acc: 93.98%, Loss: 48.5233
+ 98% 49/50 [00:11<00:00,  4.42it/s]Epoch: 49, train_acc: 94.07%, Loss: 48.2124
+100% 50/50 [00:11<00:00,  4.28it/s]
+Training attack model for 5/10 label "5" ...
+  0% 0/50 [00:00<?, ?it/s]Epoch: 0, train_acc: 91.24%, Loss: 57.1621
+ 40% 20/50 [00:04<00:06,  4.46it/s]Epoch: 20, train_acc: 93.20%, Loss: 46.9800
+ 80% 40/50 [00:09<00:02,  4.47it/s]Epoch: 40, train_acc: 94.08%, Loss: 46.7758
+ 98% 49/50 [00:11<00:00,  4.37it/s]Epoch: 49, train_acc: 95.08%, Loss: 45.3592
+100% 50/50 [00:11<00:00,  4.31it/s]
+Training attack model for 6/10 label "6" ...
+  0% 0/50 [00:00<?, ?it/s]Epoch: 0, train_acc: 79.17%, Loss: 67.2873
+ 40% 20/50 [00:04<00:06,  4.38it/s]Epoch: 20, train_acc: 87.29%, Loss: 56.1100
+ 80% 40/50 [00:09<00:02,  4.51it/s]Epoch: 40, train_acc: 88.24%, Loss: 53.7487
+ 98% 49/50 [00:11<00:00,  4.52it/s]Epoch: 49, train_acc: 87.76%, Loss: 53.6800
+100% 50/50 [00:11<00:00,  4.34it/s]
+Training attack model for 7/10 label "7" ...
+  0% 0/50 [00:00<?, ?it/s]Epoch: 0, train_acc: 83.70%, Loss: 66.5368
+ 40% 20/50 [00:04<00:06,  4.47it/s]Epoch: 20, train_acc: 85.92%, Loss: 55.4924
+ 80% 40/50 [00:09<00:02,  4.54it/s]Epoch: 40, train_acc: 88.57%, Loss: 54.4874
+ 98% 49/50 [00:11<00:00,  4.49it/s]Epoch: 49, train_acc: 87.94%, Loss: 54.5805
+100% 50/50 [00:11<00:00,  4.31it/s]
+Training attack model for 8/10 label "8" ...
+  0% 0/50 [00:00<?, ?it/s]Epoch: 0, train_acc: 78.06%, Loss: 72.8742
+ 40% 20/50 [00:04<00:06,  4.52it/s]Epoch: 20, train_acc: 82.07%, Loss: 61.5605
+ 80% 40/50 [00:09<00:02,  4.38it/s]Epoch: 40, train_acc: 84.46%, Loss: 59.4933
+ 98% 49/50 [00:11<00:00,  4.51it/s]Epoch: 49, train_acc: 84.71%, Loss: 58.7214
+100% 50/50 [00:11<00:00,  4.36it/s]
+Training attack model for 9/10 label "9" ...
+  0% 0/50 [00:00<?, ?it/s]Epoch: 0, train_acc: 84.27%, Loss: 66.9282
+ 40% 20/50 [00:04<00:06,  4.65it/s]Epoch: 20, train_acc: 86.36%, Loss: 55.1477
+ 80% 40/50 [00:08<00:02,  4.66it/s]Epoch: 40, train_acc: 88.16%, Loss: 54.5488
+ 98% 49/50 [00:10<00:00,  4.58it/s]Epoch: 49, train_acc: 88.03%, Loss: 54.2082
+100% 50/50 [00:11<00:00,  4.48it/s]
+Finish preparing the attack...
+Start membership inference...
+Finish membership inference...
+Start membership inference...
+Finish membership inference...
+  ✓ shokri completed
+
+================================================================================
+EVALUATION
+================================================================================
+Ground truth: 40000 members, 10000 non-members
+Total samples in ground truth: 50000
+Evaluating all attacks...
+shokri: {'auc': 0.510616645, 'tpr_at_fpr_0.01': 0.010825, 'tpr_at_fpr_0.001': 0.00115, 'accuracy': 0.20282}
+
+Attack Performance:
+
+shokri:
+  auc: 0.5106
+  tpr_at_fpr_0.01: 0.0108
+  tpr_at_fpr_0.001: 0.0011
+  accuracy: 0.2028
+
+================================================================================
+SAVING RESULTS
+================================================================================
+Saving results to ./results/mia_disparity...
+Results saved to ./results/mia_disparity
+Evaluating all attacks...
+shokri: {'auc': 0.510616645, 'tpr_at_fpr_0.01': 0.010825, 'tpr_at_fpr_0.001': 0.00115, 'accuracy': 0.20282}
+
+================================================================================
+MEMBERSHIP INFERENCE ATTACK EVALUATION REPORT
+================================================================================
+Dataset: cifar10
+Model: resnet18
+Unlearning Method: scrub
+Date: 2026-02-19T20:51:46
+
+INDIVIDUAL ATTACK RESULTS:
+--------------------------------------------------------------------------------
+
+shokri:
+  auc: 0.5106
+  tpr_at_fpr_0.01: 0.0108
+  tpr_at_fpr_0.001: 0.0011
+  accuracy: 0.2028
+
+================================================================================
+Report saved to: ./results/mia_disparity/evaluation_report.txt
+
+================================================================================
+EXPERIMENT COMPLETE
+===================================================================
