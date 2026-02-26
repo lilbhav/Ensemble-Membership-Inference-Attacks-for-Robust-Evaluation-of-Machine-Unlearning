@@ -670,7 +670,6 @@ class ReferenceAttackWrapper:
             model_access = CalibrationModelAccess(
                 model=target_model,
                 untrained_model=untrained_model,
-                access_type=ModelAccessType.BLACK_BOX,
             )
 
             self.logger.info("Preparing calibration attack...")
@@ -740,6 +739,14 @@ class ReferenceAttackWrapper:
             Tuple of (member_scores, nonmember_scores, all_predictions)
         """
         self.logger.info("Running Augmentation attack...")
+
+        if augmentation_type == "d" and int(augment_kwarg) != 2:
+            self.logger.warning(
+                "augmentation_type='d' in bundled mia-disparity expects augment_kwarg=2 "
+                "(9 augmented signals). Overriding provided value "
+                f"{augment_kwarg} -> 2 to avoid attack-model shape mismatch."
+            )
+            augment_kwarg = 2
 
         if not HAS_REFERENCE_AUGMENTATION:
             self.logger.warning("Reference augmentation not available. Using placeholder.")

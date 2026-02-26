@@ -62,7 +62,7 @@ mia:
     - name: "augmentation"
       params:
         batch_size: 64
-        num_augmentations: 10
+        num_augmentations: 2
 
 output:
   save_dir: "./results/mia_disparity"
