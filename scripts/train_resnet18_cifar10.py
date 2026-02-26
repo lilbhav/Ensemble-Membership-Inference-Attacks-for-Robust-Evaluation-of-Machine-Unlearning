@@ -9,17 +9,18 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
+from torchvision import datasets, transforms
 import torchvision.models as models
 from tqdm import tqdm
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from data.loaders import load_dataset, get_num_classes
+from data.loaders import get_num_classes
 
 
 def train_resnet18_cifar10(
-    num_epochs=5,
+    num_epochs=12,
     batch_size=128,
     learning_rate=0.1,
     output_checkpoint="/content/gdrive/My Drive/mia_checkpoints/pretrained_cifar10.pt"
@@ -35,15 +36,28 @@ def train_resnet18_cifar10(
     
     # ========== LOAD DATA ==========
     print("\n1. Loading CIFAR-10 dataset...")
-    train_dataset = load_dataset(
-        dataset_name="cifar10",
+    train_transform = transforms.Compose([
+        transforms.RandomCrop(32, padding=4),
+        transforms.RandomHorizontalFlip(),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.4914, 0.4822, 0.4465], std=[0.2470, 0.2435, 0.2616]),
+    ])
+    test_transform = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.4914, 0.4822, 0.4465], std=[0.2470, 0.2435, 0.2616]),
+    ])
+
+    train_dataset = datasets.CIFAR10(
         root="./data/raw",
-        train=True
+        train=True,
+        transform=train_transform,
+        download=True,
     )
-    test_dataset = load_dataset(
-        dataset_name="cifar10",
+    test_dataset = datasets.CIFAR10(
         root="./data/raw",
-        train=False
+        train=False,
+        transform=test_transform,
+        download=True,
     )
     
     train_loader = DataLoader(
@@ -67,7 +81,7 @@ def train_resnet18_cifar10(
     # ========== LOAD MODEL ==========
     print("\n2. Loading pre-trained ResNet-18...")
     num_classes = get_num_classes("cifar10")
-    model = models.resnet18(pretrained=True)
+    model = models.resnet18(weights=models.ResNet18_Weights.IMAGENET1K_V1)
     
     # Adapt the model for CIFAR-10 (modify first conv layer and classification head)
     model.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False)
@@ -78,12 +92,12 @@ def train_resnet18_cifar10(
     print(f"   ResNet-18 adapted for CIFAR-10 ({num_classes} classes)")
     
     # ========== SETUP TRAINING ==========
-    criterion = nn.CrossEntropyLoss()
+    criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
     optimizer = optim.SGD(
         model.parameters(),
         lr=learning_rate,
         momentum=0.9,
-        weight_decay=5e-4
+        weight_decay=1e-3
     )
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=num_epochs)
     
@@ -152,7 +166,7 @@ def train_resnet18_cifar10(
 
 if __name__ == "__main__":
     model = train_resnet18_cifar10(
-        num_epochs=25,
+        num_epochs=12,
         batch_size=256,
         learning_rate=0.1,
         output_checkpoint="/content/gdrive/My Drive/mia_checkpoints/pretrained_cifar10.pt",
