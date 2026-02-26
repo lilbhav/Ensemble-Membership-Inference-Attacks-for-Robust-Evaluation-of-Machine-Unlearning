@@ -835,11 +835,13 @@ class ReferenceAttackWrapper:
             # Create model copy for untrained access
             untrained_model = copy.deepcopy(target_model)
 
-            # Create model access with label-only access
+            # Create model access using reference default access type.
+            # Avoid passing an enum instance from a potentially different
+            # import namespace, which can cause access-type equality checks
+            # inside mia-disparity to fail.
             model_access = AugModelAccess(
                 model=target_model,
                 untrained_model=untrained_model,
-                access_type=ModelAccessType.LABEL_ONLY
             )
 
             # Run attack with safe globals context
