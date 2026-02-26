@@ -11,6 +11,7 @@ import logging
 import copy
 import tempfile
 import inspect
+import importlib
 from typing import Dict, Optional, Tuple, Any
 from pathlib import Path
 
@@ -28,31 +29,47 @@ if _REF_CODE_PATH not in sys.path:
     sys.path.insert(0, _REF_CODE_PATH)
 
 # Try to import reference implementations
+AugAttack = AugAuxiliaryInfo = AugModelAccess = None
+ShokriAttack = ShokriAuxiliaryInfo = ShokriModelAccess = None
+LiraAttack = LiraAuxiliaryInfo = LiraModelAccess = None
+CalibrationAttack = CalibrationAuxiliaryInfo = CalibrationModelAccess = None
+ModelAccessType = AttackTrainingSet = None
+
 try:
-    from Third_Party_Code.miadisparity.miae.attacks.aug_mia import AugAttack, AugAuxiliaryInfo, AugModelAccess
-    from Third_Party_Code.miadisparity.miae.attacks.base import ModelAccessType, AttackTrainingSet
+    aug_mia = importlib.import_module("miae.attacks.aug_mia")
+    base = importlib.import_module("miae.attacks.base")
+    AugAttack = aug_mia.AugAttack
+    AugAuxiliaryInfo = aug_mia.AugAuxiliaryInfo
+    AugModelAccess = aug_mia.AugModelAccess
+    ModelAccessType = base.ModelAccessType
+    AttackTrainingSet = base.AttackTrainingSet
     HAS_REFERENCE_AUGMENTATION = True
 except ImportError:
     HAS_REFERENCE_AUGMENTATION = False
 
 try:
-    from Third_Party_Code.miadisparity.miae.attacks.shokri_mia import ShokriAttack, ShokriAuxiliaryInfo, ShokriModelAccess
+    shokri_mia = importlib.import_module("miae.attacks.shokri_mia")
+    ShokriAttack = shokri_mia.ShokriAttack
+    ShokriAuxiliaryInfo = shokri_mia.ShokriAuxiliaryInfo
+    ShokriModelAccess = shokri_mia.ShokriModelAccess
     HAS_REFERENCE_SHOKRI = True
 except ImportError:
     HAS_REFERENCE_SHOKRI = False
 
 try:
-    from Third_Party_Code.miadisparity.miae.attacks.lira_mia import LiraAttack, LiraAuxiliaryInfo, LiraModelAccess
+    lira_mia = importlib.import_module("miae.attacks.lira_mia")
+    LiraAttack = lira_mia.LiraAttack
+    LiraAuxiliaryInfo = lira_mia.LiraAuxiliaryInfo
+    LiraModelAccess = lira_mia.LiraModelAccess
     HAS_REFERENCE_LIRA = True
 except ImportError:
     HAS_REFERENCE_LIRA = False
 
 try:
-    from Third_Party_Code.miadisparity.miae.attacks.calibration_mia import (
-        CalibrationAttack,
-        CalibrationAuxiliaryInfo,
-        CalibrationModelAccess,
-    )
+    calibration_mia = importlib.import_module("miae.attacks.calibration_mia")
+    CalibrationAttack = calibration_mia.CalibrationAttack
+    CalibrationAuxiliaryInfo = calibration_mia.CalibrationAuxiliaryInfo
+    CalibrationModelAccess = calibration_mia.CalibrationModelAccess
     HAS_REFERENCE_CALIBRATION = True
 except ImportError:
     HAS_REFERENCE_CALIBRATION = False
@@ -670,6 +687,7 @@ class ReferenceAttackWrapper:
             model_access = CalibrationModelAccess(
                 model=target_model,
                 untrained_model=untrained_model,
+                access_type=ModelAccessType.BLACK_BOX,
             )
 
             self.logger.info("Preparing calibration attack...")
