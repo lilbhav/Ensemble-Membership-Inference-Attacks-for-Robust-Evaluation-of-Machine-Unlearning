@@ -278,14 +278,20 @@ class ReferenceAttackWrapper:
 
             # Get membership scores with safe globals context
             self.logger.info("Inferring membership...")
+            combined_dataset = TensorDataset(
+                torch.cat([train_data, test_data], dim=0),
+                torch.cat([train_labels, test_labels], dim=0),
+            )
+            num_member = len(train_dataset)
             try:
                 with torch.serialization.safe_globals([AttackTrainingSet]):
-                    member_scores = attack.infer(train_dataset)
-                    nonmember_scores = attack.infer(test_dataset)
+                    combined_scores = attack.infer(combined_dataset)
             except TypeError:
                 # Fallback if safe_globals doesn't support context manager
-                member_scores = attack.infer(train_dataset)
-                nonmember_scores = attack.infer(test_dataset)
+                combined_scores = attack.infer(combined_dataset)
+
+            member_scores = np.asarray(combined_scores[:num_member], dtype=float)
+            nonmember_scores = np.asarray(combined_scores[num_member:], dtype=float)
 
             # Clip to [0, 1]
             member_scores = np.clip(member_scores, 0, 1)
