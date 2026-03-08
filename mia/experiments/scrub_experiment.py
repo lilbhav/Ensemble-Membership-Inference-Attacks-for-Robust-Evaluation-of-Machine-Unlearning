@@ -79,6 +79,7 @@ def scrub(loaders, args):
     results_path = getattr(args, "results_path", None)
 
     # Baseline evaluation (pre-unlearning)
+    base_acc = None
     try:
         model.eval()
         base_acc = {
@@ -109,6 +110,8 @@ def scrub(loaders, args):
     refresh_lr_multiplier = float(getattr(args, "refresh_lr_multiplier", 0.05))
     max_forget_loss_magnitude = float(getattr(args, "max_forget_loss_magnitude", 1e4))
     min_selected_vr = float(getattr(args, "min_selected_vr", 0.0))
+    min_forget_drop = float(getattr(args, "min_forget_drop", 0.0))
+    max_retain_drop = float(getattr(args, "max_retain_drop", 1.0))
 
     # Teacher and student
     model_t = copy.deepcopy(model).to(device)
@@ -166,16 +169,39 @@ def scrub(loaders, args):
     best_vf_under_retain_floor = float("inf")
     best_epoch_under_retain_floor = "none"
     best_state_under_retain_floor = None
+    best_gap_score = float("-inf")
+    best_gap_epoch = "none"
+    best_gap_state = None
 
     def _update_selection_candidates(phase_label: str, acc_dict: dict) -> None:
         nonlocal best_tradeoff_score, best_epoch, best_state_dict
         nonlocal best_vf_under_retain_floor, best_epoch_under_retain_floor, best_state_under_retain_floor
+        nonlocal best_gap_score, best_gap_epoch, best_gap_state
 
         tradeoff_score = float(acc_dict['vr_acc']) - selection_weight * float(acc_dict['vf_acc'])
         if tradeoff_score > best_tradeoff_score:
             best_tradeoff_score = tradeoff_score
             best_epoch = phase_label
             best_state_dict = copy.deepcopy(model_s.state_dict())
+
+        # Baseline-aware constraints for random-sample unlearning selection.
+        meets_baseline_constraints = True
+        if base_acc is not None:
+            retain_drop = float(base_acc['vr_acc']) - float(acc_dict['vr_acc'])
+            forget_drop = float(base_acc['vf_acc']) - float(acc_dict['vf_acc'])
+            meets_baseline_constraints = (
+                retain_drop <= max_retain_drop and forget_drop >= min_forget_drop
+            )
+
+        gap_score = float(acc_dict['vr_acc']) - float(acc_dict['vf_acc'])
+        if (
+            float(acc_dict['vr_acc']) >= min_selected_vr
+            and meets_baseline_constraints
+            and gap_score > best_gap_score
+        ):
+            best_gap_score = gap_score
+            best_gap_epoch = phase_label
+            best_gap_state = copy.deepcopy(model_s.state_dict())
 
         if float(acc_dict['vr_acc']) >= min_selected_vr and float(acc_dict['vf_acc']) < best_vf_under_retain_floor:
             best_vf_under_retain_floor = float(acc_dict['vf_acc'])
@@ -348,7 +374,15 @@ def scrub(loaders, args):
 
         _update_selection_candidates(f"retain:{epoch}", acc_dict)
 
-    if best_state_under_retain_floor is not None:
+    if best_gap_state is not None:
+        model_s.load_state_dict(best_gap_state)
+        print(
+            "Selected best epoch by constrained gap criterion "
+            f"(maximize vr_acc-vf_acc with vr_acc >= {min_selected_vr:.4f}, "
+            f"min_forget_drop >= {min_forget_drop:.4f}, max_retain_drop <= {max_retain_drop:.4f}): "
+            f"{best_gap_epoch} with gap {best_gap_score:.4f}"
+        )
+    elif best_state_under_retain_floor is not None:
         model_s.load_state_dict(best_state_under_retain_floor)
         print(
             f"Selected best epoch by constrained criterion (min vf_acc with vr_acc >= {min_selected_vr:.4f}): "
@@ -395,6 +429,8 @@ def scrub(loaders, args):
         'best_tradeoff_score': best_tradeoff_score,
         'best_epoch_under_retain_floor': best_epoch_under_retain_floor,
         'best_vf_under_retain_floor': best_vf_under_retain_floor,
+        'best_gap_epoch': best_gap_epoch,
+        'best_gap_score': best_gap_score,
     }
 
     return model_s, history
@@ -449,6 +485,19 @@ def main():
 
     print(f"  Retain set size: {len(retain_set)}")
     print(f"  Forget set size: {len(forget_set)}")
+
+    # Sanity checks for random-sample unlearning setup.
+    retain_idx = set(getattr(retain_set, "indices", []))
+    forget_idx = set(getattr(forget_set, "indices", []))
+    if retain_idx and forget_idx:
+        overlap = len(retain_idx.intersection(forget_idx))
+        if overlap != 0:
+            raise RuntimeError(f"Invalid split: retain/forget overlap detected ({overlap} samples).")
+        if len(retain_idx) + len(forget_idx) != len(dataset):
+            raise RuntimeError(
+                "Invalid split: retain+forget sizes do not cover the full dataset. "
+                f"retain={len(retain_idx)}, forget={len(forget_idx)}, total={len(dataset)}"
+            )
 
     # ========== 3. CREATE TRAIN/VAL SPLITS ==========
     retain_len = len(retain_set)
