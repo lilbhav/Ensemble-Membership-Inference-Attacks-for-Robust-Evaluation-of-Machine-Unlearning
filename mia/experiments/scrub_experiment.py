@@ -104,8 +104,11 @@ def scrub(loaders, args):
     msteps = args.msteps
     weight_decay = getattr(args, "weight_decay", 1e-4)
     forget_refresh_steps = int(getattr(args, "forget_refresh_steps", 0))
+    forget_refresh_every = int(getattr(args, "forget_refresh_every", 1))
     forget_lr_multiplier = float(getattr(args, "forget_lr_multiplier", 0.5))
+    refresh_lr_multiplier = float(getattr(args, "refresh_lr_multiplier", 0.05))
     max_forget_loss_magnitude = float(getattr(args, "max_forget_loss_magnitude", 1e4))
+    min_selected_vr = float(getattr(args, "min_selected_vr", 0.0))
 
     # Teacher and student
     model_t = copy.deepcopy(model).to(device)
@@ -143,6 +146,14 @@ def scrub(loaders, args):
         nesterov=True,
     )
 
+    optimizer_refresh = optim.SGD(
+        trainable_list.parameters(),
+        lr=learning_rate * refresh_lr_multiplier,
+        momentum=0.9,
+        weight_decay=weight_decay,
+        nesterov=True,
+    )
+
     # Track metrics
     tf_accs, tr_accs, vf_accs, vr_accs = [], [], [], []
     forget_phase_metrics = []
@@ -152,6 +163,9 @@ def scrub(loaders, args):
     best_tradeoff_score = float("-inf")
     best_epoch = 0
     best_state_dict = None
+    best_vf_under_retain_floor = float("inf")
+    best_epoch_under_retain_floor = 0
+    best_state_under_retain_floor = None
 
     # Training args
     t_opt = SimpleNamespace()
@@ -253,7 +267,7 @@ def scrub(loaders, args):
             sys.stdout.flush()
             raise
 
-        if forget_refresh_steps > 0:
+        if forget_refresh_steps > 0 and (forget_refresh_every <= 1 or epoch % forget_refresh_every == 0):
             freeze_bn(model_s)
             for refresh_step in range(1, forget_refresh_steps + 1):
                 pre_refresh_state = copy.deepcopy(model_s.state_dict())
@@ -263,7 +277,7 @@ def scrub(loaders, args):
                     module_list,
                     None,
                     criterion_list,
-                    optimizer_forget,
+                    optimizer_refresh,
                     t_opt,
                     "maximize",
                     quiet=False,
@@ -322,7 +336,18 @@ def scrub(loaders, args):
             best_epoch = epoch
             best_state_dict = copy.deepcopy(model_s.state_dict())
 
-    if best_state_dict is not None:
+        if float(acc_dict['vr_acc']) >= min_selected_vr and float(acc_dict['vf_acc']) < best_vf_under_retain_floor:
+            best_vf_under_retain_floor = float(acc_dict['vf_acc'])
+            best_epoch_under_retain_floor = epoch
+            best_state_under_retain_floor = copy.deepcopy(model_s.state_dict())
+
+    if best_state_under_retain_floor is not None:
+        model_s.load_state_dict(best_state_under_retain_floor)
+        print(
+            f"Selected best epoch by constrained criterion (min vf_acc with vr_acc >= {min_selected_vr:.4f}): "
+            f"epoch {best_epoch_under_retain_floor} with vf_acc {best_vf_under_retain_floor:.4f}"
+        )
+    elif best_state_dict is not None:
         model_s.load_state_dict(best_state_dict)
         print(
             f"Selected best epoch by tradeoff (vr_acc - {selection_weight:.2f}*vf_acc): "
@@ -361,6 +386,8 @@ def scrub(loaders, args):
         'selected_acc': selected_acc,
         'best_epoch': best_epoch,
         'best_tradeoff_score': best_tradeoff_score,
+        'best_epoch_under_retain_floor': best_epoch_under_retain_floor,
+        'best_vf_under_retain_floor': best_vf_under_retain_floor,
     }
 
     return model_s, history
