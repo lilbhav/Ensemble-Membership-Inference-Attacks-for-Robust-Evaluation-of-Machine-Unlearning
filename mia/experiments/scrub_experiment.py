@@ -104,6 +104,8 @@ def scrub(loaders, args):
     msteps = args.msteps
     weight_decay = getattr(args, "weight_decay", 1e-4)
     forget_refresh_steps = int(getattr(args, "forget_refresh_steps", 0))
+    forget_lr_multiplier = float(getattr(args, "forget_lr_multiplier", 0.5))
+    max_forget_loss_magnitude = float(getattr(args, "max_forget_loss_magnitude", 1e4))
 
     # Teacher and student
     model_t = copy.deepcopy(model).to(device)
@@ -127,7 +129,7 @@ def scrub(loaders, args):
     # Optimizers
     optimizer_forget = optim.SGD(
         trainable_list.parameters(),
-        lr=learning_rate * 2.0,
+        lr=learning_rate * forget_lr_multiplier,
         momentum=0.9,
         weight_decay=weight_decay,
         nesterov=True,
@@ -181,6 +183,7 @@ def scrub(loaders, args):
             sys.stdout.flush()
 
             try:
+                pre_step_state = copy.deepcopy(model_s.state_dict())
                 maximize_loss = train_distill(
                     f_epoch,
                     train_forget_loader,
@@ -206,10 +209,12 @@ def scrub(loaders, args):
                     print(f"   {line}")
                 # Safety check: abort forget-phase if maximize_loss magnitude explodes
                 try:
-                    if abs(float(maximize_loss)) > 1e6:
+                    max_loss_val = abs(float(maximize_loss))
+                    if (not np.isfinite(max_loss_val)) or max_loss_val > max_forget_loss_magnitude:
                         print(
-                            f"    WARNING: maximize_loss magnitude too large ({maximize_loss}); stopping forget-phase early to avoid collapse."
+                            f"    WARNING: maximize_loss unstable ({maximize_loss}); restoring previous model state and stopping forget-phase early."
                         )
+                        model_s.load_state_dict(pre_step_state)
                         break
                 except Exception:
                     pass
@@ -251,6 +256,7 @@ def scrub(loaders, args):
         if forget_refresh_steps > 0:
             freeze_bn(model_s)
             for refresh_step in range(1, forget_refresh_steps + 1):
+                pre_refresh_state = copy.deepcopy(model_s.state_dict())
                 refresh_loss = train_distill(
                     epoch,
                     train_forget_loader,
@@ -266,6 +272,17 @@ def scrub(loaders, args):
                     f"    Forget refresh {refresh_step}/{forget_refresh_steps}: "
                     f"maximize_loss = {fmt_metric(refresh_loss, precision=8)}"
                 )
+                try:
+                    refresh_abs = abs(float(refresh_loss))
+                    if (not np.isfinite(refresh_abs)) or refresh_abs > max_forget_loss_magnitude:
+                        print(
+                            f"    WARNING: forget refresh unstable ({refresh_loss}); restoring previous model state and disabling further refresh this run."
+                        )
+                        model_s.load_state_dict(pre_refresh_state)
+                        forget_refresh_steps = 0
+                        break
+                except Exception:
+                    pass
 
         losses.append(train_loss)
         epoch_list.append(epoch)
@@ -290,6 +307,10 @@ def scrub(loaders, args):
             f"Epoch {epoch}: minimize loss: {fmt_metric(train_loss, precision=8)}, "
             f"train_acc: {fmt_metric(train_acc, precision=6)}"
         )
+
+        if not np.isfinite(float(train_loss)):
+            print("WARNING: train_loss became non-finite; stopping retain phase early to avoid model collapse.")
+            break
 
         if args.print_accuracies:
             line = log_accuracies(results_path, f"retain_epoch {epoch}", acc_dict)

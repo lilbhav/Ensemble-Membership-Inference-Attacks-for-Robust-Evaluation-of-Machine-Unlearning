@@ -7,7 +7,9 @@ weight_decay: 0.0005
 
 kd_T: 6.0
 msteps: 3
-forget_refresh_steps: 1
+forget_refresh_steps: 0
+forget_lr_multiplier: 0.2
+max_forget_loss_magnitude: 10000.0
 t_opt_gamma: 1.0
 t_opt_alpha: 1.0
 
@@ -17,7 +19,7 @@ model_path: /content/gdrive/My Drive/mia_checkpoints/pretrained_cifar10.pt
 forget_fraction: 0.2
 seed: 42
 split_dir: ./data/splits
-selection_weight: 1.5
+selection_weight: 1.2
 
 check_path: /content/gdrive/My Drive/mia_checkpoints/scrub_unlearned_model.pt
 results_path: ./results/scrub_unlearned_model/results.txt
