@@ -161,11 +161,26 @@ def scrub(loaders, args):
 
     selection_weight = float(getattr(args, "selection_weight", 1.0))
     best_tradeoff_score = float("-inf")
-    best_epoch = 0
+    best_epoch = "retain:0"
     best_state_dict = None
     best_vf_under_retain_floor = float("inf")
-    best_epoch_under_retain_floor = 0
+    best_epoch_under_retain_floor = "none"
     best_state_under_retain_floor = None
+
+    def _update_selection_candidates(phase_label: str, acc_dict: dict) -> None:
+        nonlocal best_tradeoff_score, best_epoch, best_state_dict
+        nonlocal best_vf_under_retain_floor, best_epoch_under_retain_floor, best_state_under_retain_floor
+
+        tradeoff_score = float(acc_dict['vr_acc']) - selection_weight * float(acc_dict['vf_acc'])
+        if tradeoff_score > best_tradeoff_score:
+            best_tradeoff_score = tradeoff_score
+            best_epoch = phase_label
+            best_state_dict = copy.deepcopy(model_s.state_dict())
+
+        if float(acc_dict['vr_acc']) >= min_selected_vr and float(acc_dict['vf_acc']) < best_vf_under_retain_floor:
+            best_vf_under_retain_floor = float(acc_dict['vf_acc'])
+            best_epoch_under_retain_floor = phase_label
+            best_state_under_retain_floor = copy.deepcopy(model_s.state_dict())
 
     # Training args
     t_opt = SimpleNamespace()
@@ -221,6 +236,7 @@ def scrub(loaders, args):
                 if args.print_accuracies:
                     line = log_accuracies(results_path, f"forget_step {f_epoch}", acc_dict)
                     print(f"   {line}")
+                _update_selection_candidates(f"forget:{f_epoch}", acc_dict)
                 # Safety check: abort forget-phase if maximize_loss magnitude explodes
                 try:
                     max_loss_val = abs(float(maximize_loss))
@@ -330,28 +346,19 @@ def scrub(loaders, args):
             line = log_accuracies(results_path, f"retain_epoch {epoch}", acc_dict)
             print(f"   {line}")
 
-        tradeoff_score = float(acc_dict['vr_acc']) - selection_weight * float(acc_dict['vf_acc'])
-        if tradeoff_score > best_tradeoff_score:
-            best_tradeoff_score = tradeoff_score
-            best_epoch = epoch
-            best_state_dict = copy.deepcopy(model_s.state_dict())
-
-        if float(acc_dict['vr_acc']) >= min_selected_vr and float(acc_dict['vf_acc']) < best_vf_under_retain_floor:
-            best_vf_under_retain_floor = float(acc_dict['vf_acc'])
-            best_epoch_under_retain_floor = epoch
-            best_state_under_retain_floor = copy.deepcopy(model_s.state_dict())
+        _update_selection_candidates(f"retain:{epoch}", acc_dict)
 
     if best_state_under_retain_floor is not None:
         model_s.load_state_dict(best_state_under_retain_floor)
         print(
             f"Selected best epoch by constrained criterion (min vf_acc with vr_acc >= {min_selected_vr:.4f}): "
-            f"epoch {best_epoch_under_retain_floor} with vf_acc {best_vf_under_retain_floor:.4f}"
+            f"{best_epoch_under_retain_floor} with vf_acc {best_vf_under_retain_floor:.4f}"
         )
     elif best_state_dict is not None:
         model_s.load_state_dict(best_state_dict)
         print(
             f"Selected best epoch by tradeoff (vr_acc - {selection_weight:.2f}*vf_acc): "
-            f"epoch {best_epoch} with score {best_tradeoff_score:.4f}"
+            f"{best_epoch} with score {best_tradeoff_score:.4f}"
         )
 
     model_s.eval()

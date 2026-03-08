@@ -7,7 +7,7 @@ weight_decay: 0.0005
 
 kd_T: 6.0
 msteps: 3
-forget_refresh_steps: 1
+forget_refresh_steps: 0
 forget_refresh_every: 2
 forget_lr_multiplier: 0.2
 refresh_lr_multiplier: 0.03
@@ -22,7 +22,7 @@ forget_fraction: 0.2
 seed: 42
 split_dir: ./data/splits
 selection_weight: 1.2
-min_selected_vr: 0.88
+min_selected_vr: 0.84
 
 check_path: /content/gdrive/My Drive/mia_checkpoints/scrub_unlearned_model.pt
 results_path: ./results/scrub_unlearned_model/results.txt
