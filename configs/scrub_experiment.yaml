@@ -21,10 +21,10 @@ model_path: /content/gdrive/My Drive/mia_checkpoints/pretrained_cifar10.pt
 forget_fraction: 0.2
 seed: 42
 split_dir: ./data/splits
-selection_weight: 1.2
-min_selected_vr: 0.84
-min_forget_drop: 0.01
-max_retain_drop: 0.05
+selection_weight: 1.3
+min_selected_vr: 0.86
+min_forget_drop: 0.015
+max_retain_drop: 0.035
 
 check_path: /content/gdrive/My Drive/mia_checkpoints/scrub_unlearned_model.pt
 results_path: ./results/scrub_unlearned_model/results.txt

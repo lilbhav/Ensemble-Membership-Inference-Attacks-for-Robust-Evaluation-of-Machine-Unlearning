@@ -94,7 +94,7 @@ def scrub(loaders, args):
             )
         )
         if args.print_accuracies:
-            _ = log_accuracies(results_path, "baseline", base_acc)
+            log_accuracies(results_path, "baseline", base_acc)
     except Exception as e:
         print(f"Warning: baseline evaluation failed: {e}")
 
@@ -216,14 +216,6 @@ def scrub(loaders, args):
     t_opt.beta = 0
     t_opt.print_freq = 0
 
-    def fmt_metric(value, precision=6):
-        if value is None:
-            return "None"
-        try:
-            return f"{value:.{precision}f}"
-        except (TypeError, ValueError):
-            return repr(value)
-
     # =======================
     # Phase 1: Forget Phase
     # =======================
@@ -232,82 +224,59 @@ def scrub(loaders, args):
         freeze_bn(model_s)
 
         for f_epoch in range(1, msteps + 1):
-            print(f"[Forget Phase {f_epoch}/{msteps}] Starting epoch...")
-            sys.stdout.flush()
-            print("  - Maximizing loss on forget set...")
-            sys.stdout.flush()
+            print(f"[Forget Phase {f_epoch}/{msteps}]")
 
-            try:
-                pre_step_state = copy.deepcopy(model_s.state_dict())
-                maximize_loss = train_distill(
-                    f_epoch,
-                    train_forget_loader,
-                    module_list,
-                    None,
-                    criterion_list,
-                    optimizer_forget,
-                    t_opt,
-                    "maximize",
-                    quiet=False,
+            pre_step_state = copy.deepcopy(model_s.state_dict())
+            maximize_loss = train_distill(
+                f_epoch,
+                train_forget_loader,
+                module_list,
+                None,
+                criterion_list,
+                optimizer_forget,
+                t_opt,
+                "maximize",
+                quiet=False,
+            )
+            print(f"  maximize_loss: {float(maximize_loss):.4f}")
+
+            acc_dict = {
+                'tr_acc': compute_accuracy(model_s, train_retain_loader, device),
+                'tf_acc': compute_accuracy(model_s, train_forget_loader, device),
+                'vr_acc': compute_accuracy(model_s, valid_retain_loader, device),
+                'vf_acc': compute_accuracy(model_s, valid_forget_loader, device),
+            }
+            forget_phase_metrics.append(acc_dict)
+            if args.print_accuracies:
+                line = log_accuracies(results_path, f"forget_step {f_epoch}", acc_dict)
+                print(f"  {line}")
+            _update_selection_candidates(f"forget:{f_epoch}", acc_dict)
+
+            max_loss_val = abs(float(maximize_loss))
+            if (not np.isfinite(max_loss_val)) or max_loss_val > max_forget_loss_magnitude:
+                print(
+                    f"  WARNING: maximize_loss unstable ({maximize_loss}); restoring previous state and stopping forget phase."
                 )
-                print(f"    Done: maximize_loss = {maximize_loss:.4f}")
-                sys.stdout.flush()
-                acc_dict = {
-                    'tr_acc': compute_accuracy(model_s, train_retain_loader, device),
-                    'tf_acc': compute_accuracy(model_s, train_forget_loader, device),
-                    'vr_acc': compute_accuracy(model_s, valid_retain_loader, device),
-                    'vf_acc': compute_accuracy(model_s, valid_forget_loader, device),
-                }
-                forget_phase_metrics.append(acc_dict)
-                if args.print_accuracies:
-                    line = log_accuracies(results_path, f"forget_step {f_epoch}", acc_dict)
-                    print(f"   {line}")
-                _update_selection_candidates(f"forget:{f_epoch}", acc_dict)
-                # Safety check: abort forget-phase if maximize_loss magnitude explodes
-                try:
-                    max_loss_val = abs(float(maximize_loss))
-                    if (not np.isfinite(max_loss_val)) or max_loss_val > max_forget_loss_magnitude:
-                        print(
-                            f"    WARNING: maximize_loss unstable ({maximize_loss}); restoring previous model state and stopping forget-phase early."
-                        )
-                        model_s.load_state_dict(pre_step_state)
-                        break
-                except Exception:
-                    pass
-            except Exception as e:
-                print(f"    ERROR during maximize: {e}")
-                sys.stdout.flush()
-                raise
+                model_s.load_state_dict(pre_step_state)
+                break
 
     # =======================
     # Phase 2: Retain Phase
     # =======================
     print("\n===== RETAIN PHASE =====")
     for epoch in range(1, epochs + 1):
-        print(f"[Retain Phase {epoch}/{epochs}] Starting epoch...")
-        sys.stdout.flush()
-        print("  - Minimizing loss on retain set...")
-        sys.stdout.flush()
-
-        try:
-            train_acc, train_loss = train_distill(
-                epoch,
-                train_retain_loader,
-                module_list,
-                None,
-                criterion_list,
-                optimizer_retain,
-                t_opt,
-                "minimize",
-                quiet=False,
-            )
-            print(f"    Done: train_loss = {fmt_metric(train_loss, precision=8)}")
-            print(f"    Raw: train_loss={train_loss!r}, train_acc={train_acc!r}")
-            sys.stdout.flush()
-        except Exception as e:
-            print(f"    ERROR during minimize: {e}")
-            sys.stdout.flush()
-            raise
+        print(f"[Retain Phase {epoch}/{epochs}]")
+        train_acc, train_loss = train_distill(
+            epoch,
+            train_retain_loader,
+            module_list,
+            None,
+            criterion_list,
+            optimizer_retain,
+            t_opt,
+            "minimize",
+            quiet=False,
+        )
 
         if forget_refresh_steps > 0 and (forget_refresh_every <= 1 or epoch % forget_refresh_every == 0):
             freeze_bn(model_s)
@@ -325,14 +294,14 @@ def scrub(loaders, args):
                     quiet=False,
                 )
                 print(
-                    f"    Forget refresh {refresh_step}/{forget_refresh_steps}: "
-                    f"maximize_loss = {fmt_metric(refresh_loss, precision=8)}"
+                    f"  Forget refresh {refresh_step}/{forget_refresh_steps}: "
+                    f"maximize_loss = {float(refresh_loss):.8f}"
                 )
                 try:
                     refresh_abs = abs(float(refresh_loss))
                     if (not np.isfinite(refresh_abs)) or refresh_abs > max_forget_loss_magnitude:
                         print(
-                            f"    WARNING: forget refresh unstable ({refresh_loss}); restoring previous model state and disabling further refresh this run."
+                            f"  WARNING: forget refresh unstable ({refresh_loss}); restoring previous state and disabling refresh."
                         )
                         model_s.load_state_dict(pre_refresh_state)
                         forget_refresh_steps = 0
@@ -340,7 +309,7 @@ def scrub(loaders, args):
                 except Exception:
                     pass
 
-        losses.append(train_loss)
+        losses.append(float(train_loss))
         epoch_list.append(epoch)
 
         # Evaluation
@@ -360,8 +329,7 @@ def scrub(loaders, args):
         vf_accs.append(acc_dict['vf_acc'])
 
         print(
-            f"Epoch {epoch}: minimize loss: {fmt_metric(train_loss, precision=8)}, "
-            f"train_acc: {fmt_metric(train_acc, precision=6)}"
+            f"  train_loss: {float(train_loss):.8f}, train_acc: {float(train_acc):.6f}"
         )
 
         if not np.isfinite(float(train_loss)):
@@ -370,7 +338,7 @@ def scrub(loaders, args):
 
         if args.print_accuracies:
             line = log_accuracies(results_path, f"retain_epoch {epoch}", acc_dict)
-            print(f"   {line}")
+            print(f"  {line}")
 
         _update_selection_candidates(f"retain:{epoch}", acc_dict)
 
