@@ -49,7 +49,7 @@ def scrub(loaders, args):
     Perform SCRUB unlearning using knowledge distillation.
     """
     # Load a pre-trained ResNet-18 model checkpoint (CIFAR-10)
-    model_checkpoint = "./models/pretrained_cifar10.pt"
+    model_checkpoint = getattr(args, "model_path", "./models/pretrained_cifar10.pt")
 
     if not os.path.exists(model_checkpoint):
         raise FileNotFoundError(
@@ -61,7 +61,7 @@ def scrub(loaders, args):
     print(f"Using device: {device}")
 
     # Create model architecture and adapt for CIFAR-10
-    model = models.resnet18(pretrained=False)
+    model = models.resnet18(weights=None)
     model.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False)
     model.maxpool = nn.Identity()
     model.fc = nn.Linear(model.fc.in_features, get_num_classes("cifar10"))
@@ -75,6 +75,8 @@ def scrub(loaders, args):
     train_retain_loader = loaders['train_retain_loader']
     valid_forget_loader = loaders['valid_forget_loader']
     valid_retain_loader = loaders['valid_retain_loader']
+
+    results_path = getattr(args, "results_path", None)
 
     # Baseline evaluation (pre-unlearning)
     try:
@@ -143,7 +145,10 @@ def scrub(loaders, args):
     forget_phase_metrics = []
     losses, epoch_list = [], []
 
-    results_path = getattr(args, "results_path", None)
+    selection_weight = float(getattr(args, "selection_weight", 1.0))
+    best_tradeoff_score = float("-inf")
+    best_epoch = 0
+    best_state_dict = None
 
     # Training args
     t_opt = SimpleNamespace()
@@ -269,6 +274,19 @@ def scrub(loaders, args):
         if args.print_accuracies:
             line = log_accuracies(results_path, f"retain_epoch {epoch}", acc_dict)
             print(f"   {line}")
+
+        tradeoff_score = float(acc_dict['vr_acc']) - selection_weight * float(acc_dict['vf_acc'])
+        if tradeoff_score > best_tradeoff_score:
+            best_tradeoff_score = tradeoff_score
+            best_epoch = epoch
+            best_state_dict = copy.deepcopy(model_s.state_dict())
+
+    if best_state_dict is not None:
+        model_s.load_state_dict(best_state_dict)
+        print(
+            f"Selected best epoch by tradeoff (vr_acc - {selection_weight:.2f}*vf_acc): "
+            f"epoch {best_epoch} with score {best_tradeoff_score:.4f}"
+        )
 
     # Save student model
     if hasattr(args, 'check_path') and args.check_path is not None:
