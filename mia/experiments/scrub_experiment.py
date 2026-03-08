@@ -103,6 +103,7 @@ def scrub(loaders, args):
     epochs = args.epochs
     msteps = args.msteps
     weight_decay = getattr(args, "weight_decay", 1e-4)
+    forget_refresh_steps = int(getattr(args, "forget_refresh_steps", 0))
 
     # Teacher and student
     model_t = copy.deepcopy(model).to(device)
@@ -247,6 +248,25 @@ def scrub(loaders, args):
             sys.stdout.flush()
             raise
 
+        if forget_refresh_steps > 0:
+            freeze_bn(model_s)
+            for refresh_step in range(1, forget_refresh_steps + 1):
+                refresh_loss = train_distill(
+                    epoch,
+                    train_forget_loader,
+                    module_list,
+                    None,
+                    criterion_list,
+                    optimizer_forget,
+                    t_opt,
+                    "maximize",
+                    quiet=False,
+                )
+                print(
+                    f"    Forget refresh {refresh_step}/{forget_refresh_steps}: "
+                    f"maximize_loss = {fmt_metric(refresh_loss, precision=8)}"
+                )
+
         losses.append(train_loss)
         epoch_list.append(epoch)
 
@@ -288,6 +308,22 @@ def scrub(loaders, args):
             f"epoch {best_epoch} with score {best_tradeoff_score:.4f}"
         )
 
+    model_s.eval()
+    selected_acc = {
+        'tr_acc': compute_accuracy(model_s, train_retain_loader, device),
+        'tf_acc': compute_accuracy(model_s, train_forget_loader, device),
+        'vr_acc': compute_accuracy(model_s, valid_retain_loader, device),
+        'vf_acc': compute_accuracy(model_s, valid_forget_loader, device),
+    }
+    print(
+        "Selected model - tr_acc: {tr:.4f}, tf_acc: {tf:.4f}, vr_acc: {vr:.4f}, vf_acc: {vf:.4f}".format(
+            tr=selected_acc['tr_acc'], tf=selected_acc['tf_acc'], vr=selected_acc['vr_acc'], vf=selected_acc['vf_acc']
+        )
+    )
+    if args.print_accuracies:
+        line = log_accuracies(results_path, "selected_model", selected_acc)
+        print(f"   {line}")
+
     # Save student model
     if hasattr(args, 'check_path') and args.check_path is not None:
         os.makedirs(os.path.dirname(args.check_path), exist_ok=True)
@@ -301,6 +337,9 @@ def scrub(loaders, args):
         'vr_accs': vr_accs,
         'vf_accs': vf_accs,
         'forget_phase_metrics': forget_phase_metrics,
+        'selected_acc': selected_acc,
+        'best_epoch': best_epoch,
+        'best_tradeoff_score': best_tradeoff_score,
     }
 
     return model_s, history
@@ -423,10 +462,17 @@ def main():
     model, history = scrub(loaders, args)
 
     print("\nSCRUB unlearning completed!")
-    if history['tr_accs'][-1] is not None:
-        print(f"Final train retain acc: {history['tr_accs'][-1]:.4f}")
-    if history['vf_accs'][-1] is not None:
-        print(f"Final valid forget acc: {history['vf_accs'][-1]:.4f}")
+    selected_acc = history.get('selected_acc')
+    if selected_acc is not None:
+        print(f"Selected train retain acc: {selected_acc['tr_acc']:.4f}")
+        print(f"Selected valid retain acc: {selected_acc['vr_acc']:.4f}")
+        print(f"Selected train forget acc: {selected_acc['tf_acc']:.4f}")
+        print(f"Selected valid forget acc: {selected_acc['vf_acc']:.4f}")
+    else:
+        if history['tr_accs'][-1] is not None:
+            print(f"Final train retain acc: {history['tr_accs'][-1]:.4f}")
+        if history['vf_accs'][-1] is not None:
+            print(f"Final valid forget acc: {history['vf_accs'][-1]:.4f}")
 
     return model, history
 
