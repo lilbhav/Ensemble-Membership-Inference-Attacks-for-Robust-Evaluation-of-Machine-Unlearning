@@ -1,0 +1,385 @@
+#!/usr/bin/env python3
+"""Generate summary plots for unlearning and MIA experiment logs.
+
+This script parses text logs in the top-level `results/` directory and creates
+figures for utility, privacy leakage, and hyperparameter sweeps.
+"""
+
+from __future__ import annotations
+
+import argparse
+import csv
+import re
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple
+
+import matplotlib.pyplot as plt
+
+
+UTILITY_KEYS = ("tr_acc", "tf_acc", "vr_acc", "vf_acc")
+METHOD_ALIASES = {
+    "unlearned_model": "fine_tune",
+    "scrub_unlearned_model": "scrub",
+    "ssd_unlearned_model": "ssd",
+}
+
+
+def _method_name(path_name: str) -> str:
+    return METHOD_ALIASES.get(path_name, path_name)
+
+
+def _extract_last_float(text: str, pattern: str) -> Optional[float]:
+    matches = re.findall(pattern, text, flags=re.IGNORECASE | re.MULTILINE)
+    if not matches:
+        return None
+    return float(matches[-1])
+
+
+def parse_utility_metrics(results_txt: Path) -> Dict[str, Optional[float]]:
+    text = results_txt.read_text(encoding="utf-8", errors="ignore")
+    metrics: Dict[str, Optional[float]] = {k: None for k in UTILITY_KEYS}
+
+    for key in UTILITY_KEYS:
+        # Captures patterns like "tr_acc: 0.8415" or "tr_acc = 0.8415".
+        metrics[key] = _extract_last_float(text, rf"\\b{key}\\b\\s*[:=]\\s*([0-9]*\\.?[0-9]+)")
+
+    if metrics["tr_acc"] is None:
+        metrics["tr_acc"] = _extract_last_float(
+            text, r"Final\\s+train\\s+retain\\s+acc\\s*:\\s*([0-9]*\\.?[0-9]+)"
+        )
+    if metrics["vf_acc"] is None:
+        metrics["vf_acc"] = _extract_last_float(
+            text, r"Final\\s+valid\\s+forget\\s+acc\\s*:\\s*([0-9]*\\.?[0-9]+)"
+        )
+
+    return metrics
+
+
+def parse_attack_metrics(attack_txt: Path) -> Dict[str, Dict[str, float]]:
+    """Parse attack metric blocks and keep the latest value for each attack."""
+    text = attack_txt.read_text(encoding="utf-8", errors="ignore")
+    rows = text.splitlines()
+
+    metrics: Dict[str, Dict[str, float]] = {}
+    current_attack: Optional[str] = None
+
+    attack_header_re = re.compile(r"^\s*([a-zA-Z0-9_+\-]+):\s*$")
+    value_re = re.compile(r"^\s*(auc|accuracy|tpr_at_fpr_0\.01|tpr_at_fpr_0\.001)\s*:\s*([0-9]*\.?[0-9]+)\s*$")
+
+    for line in rows:
+        header_match = attack_header_re.match(line)
+        if header_match:
+            name = header_match.group(1).lower()
+            if name in {"shokri", "yeom", "lira", "union", "voting"}:
+                current_attack = name
+                metrics.setdefault(current_attack, {})
+            else:
+                current_attack = None
+            continue
+
+        value_match = value_re.match(line)
+        if value_match and current_attack is not None:
+            key, value = value_match.groups()
+            metrics[current_attack][key] = float(value)
+
+    # Remove incomplete attack entries that do not have auc.
+    filtered = {k: v for k, v in metrics.items() if "auc" in v}
+    return filtered
+
+
+def discover_sweep_csv(results_dir: Path) -> Optional[Path]:
+    candidates = sorted(results_dir.glob("**/ssd_sweep_summary.csv"))
+    return candidates[0] if candidates else None
+
+
+def read_sweep_csv(csv_path: Path) -> List[Dict[str, float]]:
+    rows: List[Dict[str, float]] = []
+    with csv_path.open("r", encoding="utf-8", newline="") as handle:
+        reader = csv.DictReader(handle)
+        for row in reader:
+            rows.append(
+                {
+                    "dampening_constant": float(row["dampening_constant"]),
+                    "selection_weighting": float(row["selection_weighting"]),
+                    "score_mean": float(row["score_mean"]),
+                    "forget_drop_mean": float(row["forget_drop_mean"]),
+                    "retain_drop_mean": float(row["retain_drop_mean"]),
+                }
+            )
+    return rows
+
+
+def _plot_utility_bars(utility_rows: List[Dict[str, object]], out_dir: Path, dpi: int) -> Optional[Path]:
+    if not utility_rows:
+        return None
+
+    methods = [str(row["method"]) for row in utility_rows]
+    metrics = ["tr_acc", "tf_acc", "vr_acc", "vf_acc"]
+    width = 0.18
+    x = list(range(len(methods)))
+
+    fig, ax = plt.subplots(figsize=(11, 6))
+    for idx, key in enumerate(metrics):
+        values = [row.get(key) for row in utility_rows]
+        values = [float(v) if v is not None else 0.0 for v in values]
+        offset = [(pos + (idx - 1.5) * width) for pos in x]
+        ax.bar(offset, values, width=width, label=key)
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(methods, rotation=20, ha="right")
+    ax.set_ylim(0, 1.0)
+    ax.set_ylabel("Accuracy")
+    ax.set_title("Unlearning Utility Metrics")
+    ax.legend()
+    ax.grid(axis="y", alpha=0.25)
+    fig.tight_layout()
+
+    out_path = out_dir / "utility_metrics_bar.png"
+    fig.savefig(out_path, dpi=dpi)
+    plt.close(fig)
+    return out_path
+
+
+def _plot_attack_auc_bars(attack_rows: List[Dict[str, object]], out_dir: Path, dpi: int) -> Optional[Path]:
+    if not attack_rows:
+        return None
+
+    labels = [f"{row['method']}:{row['attack']}" for row in attack_rows]
+    aucs = [float(row["auc"]) for row in attack_rows]
+
+    fig, ax = plt.subplots(figsize=(12, 6))
+    ax.bar(range(len(labels)), aucs)
+    ax.set_xticks(range(len(labels)))
+    ax.set_xticklabels(labels, rotation=35, ha="right")
+    ax.set_ylim(0, 1.0)
+    ax.set_ylabel("AUC (higher = more leakage)")
+    ax.set_title("MIA Attack AUC by Method")
+    ax.grid(axis="y", alpha=0.25)
+    fig.tight_layout()
+
+    out_path = out_dir / "mia_auc_bar.png"
+    fig.savefig(out_path, dpi=dpi)
+    plt.close(fig)
+    return out_path
+
+
+def _plot_privacy_utility_scatter(
+    utility_rows: List[Dict[str, object]],
+    max_auc_by_method: Dict[str, float],
+    out_dir: Path,
+    dpi: int,
+) -> Optional[Path]:
+    points: List[Tuple[str, float, float]] = []
+    for row in utility_rows:
+        method = str(row["method"])
+        utility = row.get("vr_acc") if row.get("vr_acc") is not None else row.get("tr_acc")
+        leakage = max_auc_by_method.get(method)
+        if utility is None or leakage is None:
+            continue
+        points.append((method, float(utility), float(leakage)))
+
+    if not points:
+        return None
+
+    fig, ax = plt.subplots(figsize=(8, 6))
+    for method, utility, leakage in points:
+        ax.scatter([utility], [leakage], s=80)
+        ax.annotate(method, (utility, leakage), textcoords="offset points", xytext=(5, 5))
+
+    ax.set_xlim(0, 1.0)
+    ax.set_ylim(0, 1.0)
+    ax.set_xlabel("Utility (valid retain acc)")
+    ax.set_ylabel("Privacy leakage (max attack AUC)")
+    ax.set_title("Privacy-Utility Tradeoff")
+    ax.grid(alpha=0.3)
+    fig.tight_layout()
+
+    out_path = out_dir / "privacy_utility_scatter.png"
+    fig.savefig(out_path, dpi=dpi)
+    plt.close(fig)
+    return out_path
+
+
+def _plot_ssd_heatmap(sweep_rows: List[Dict[str, float]], out_dir: Path, dpi: int) -> Optional[Path]:
+    if not sweep_rows:
+        return None
+
+    dampening_values = sorted({row["dampening_constant"] for row in sweep_rows})
+    selection_values = sorted({row["selection_weighting"] for row in sweep_rows})
+
+    matrix: List[List[float]] = []
+    for dc in dampening_values:
+        row_vals: List[float] = []
+        for sw in selection_values:
+            score = None
+            for row in sweep_rows:
+                if row["dampening_constant"] == dc and row["selection_weighting"] == sw:
+                    score = row["score_mean"]
+                    break
+            row_vals.append(score if score is not None else float("nan"))
+        matrix.append(row_vals)
+
+    fig, ax = plt.subplots(figsize=(9, 6))
+    image = ax.imshow(matrix, aspect="auto")
+    cbar = fig.colorbar(image, ax=ax)
+    cbar.set_label("Tradeoff score")
+
+    ax.set_xticks(range(len(selection_values)))
+    ax.set_yticks(range(len(dampening_values)))
+    ax.set_xticklabels([str(v) for v in selection_values], rotation=35, ha="right")
+    ax.set_yticklabels([str(v) for v in dampening_values])
+    ax.set_xlabel("selection_weighting")
+    ax.set_ylabel("dampening_constant")
+    ax.set_title("SSD Sweep Tradeoff Heatmap")
+
+    for i, row_vals in enumerate(matrix):
+        for j, value in enumerate(row_vals):
+            if value == value:
+                ax.text(j, i, f"{value:.3f}", ha="center", va="center", fontsize=8)
+
+    fig.tight_layout()
+    out_path = out_dir / "ssd_sweep_heatmap.png"
+    fig.savefig(out_path, dpi=dpi)
+    plt.close(fig)
+    return out_path
+
+
+def write_summary_csv(
+    utility_rows: List[Dict[str, object]],
+    max_auc_by_method: Dict[str, float],
+    out_dir: Path,
+) -> Path:
+    out_path = out_dir / "plot_data_summary.csv"
+    fieldnames = ["method", "tr_acc", "tf_acc", "vr_acc", "vf_acc", "max_attack_auc"]
+
+    with out_path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in utility_rows:
+            method = str(row["method"])
+            writer.writerow(
+                {
+                    "method": method,
+                    "tr_acc": row.get("tr_acc"),
+                    "tf_acc": row.get("tf_acc"),
+                    "vr_acc": row.get("vr_acc"),
+                    "vf_acc": row.get("vf_acc"),
+                    "max_attack_auc": max_auc_by_method.get(method),
+                }
+            )
+
+    return out_path
+
+
+def build_records(results_dir: Path) -> Tuple[List[Dict[str, object]], List[Dict[str, object]]]:
+    utility_rows: List[Dict[str, object]] = []
+    attack_rows: List[Dict[str, object]] = []
+
+    for method_dir in sorted(results_dir.iterdir()):
+        if not method_dir.is_dir():
+            continue
+
+        method = _method_name(method_dir.name)
+        results_txt = method_dir / "results.txt"
+        if results_txt.exists():
+            utility = parse_utility_metrics(results_txt)
+            utility_rows.append(
+                {
+                    "method": method,
+                    **utility,
+                }
+            )
+
+        merged_attacks: Dict[str, Dict[str, float]] = {}
+        for attack_file in sorted(method_dir.glob("*.txt")):
+            if attack_file.name == "results.txt":
+                continue
+            parsed = parse_attack_metrics(attack_file)
+            for attack_name, metrics in parsed.items():
+                merged_attacks[attack_name] = metrics
+
+        for attack_name, metrics in merged_attacks.items():
+            attack_rows.append(
+                {
+                    "method": method,
+                    "attack": attack_name,
+                    "auc": metrics.get("auc"),
+                    "accuracy": metrics.get("accuracy"),
+                    "tpr_at_fpr_0.01": metrics.get("tpr_at_fpr_0.01"),
+                    "tpr_at_fpr_0.001": metrics.get("tpr_at_fpr_0.001"),
+                }
+            )
+
+    return utility_rows, attack_rows
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Generate visual summaries for unlearning and MIA logs")
+    parser.add_argument(
+        "--results-dir",
+        type=Path,
+        default=Path("results"),
+        help="Directory containing per-method experiment outputs",
+    )
+    parser.add_argument(
+        "--out-dir",
+        type=Path,
+        default=Path("results") / "plots",
+        help="Directory for generated plots and summary CSV",
+    )
+    parser.add_argument(
+        "--sweep-csv",
+        type=Path,
+        default=None,
+        help="Optional path to ssd_sweep_summary.csv (auto-discovered if omitted)",
+    )
+    parser.add_argument("--dpi", type=int, default=180, help="DPI for saved PNG figures")
+    return parser.parse_args()
+
+
+def main() -> None:
+    args = parse_args()
+
+    if not args.results_dir.exists():
+        raise FileNotFoundError(f"results directory not found: {args.results_dir}")
+
+    args.out_dir.mkdir(parents=True, exist_ok=True)
+
+    utility_rows, attack_rows = build_records(args.results_dir)
+
+    max_auc_by_method: Dict[str, float] = {}
+    for row in attack_rows:
+        method = str(row["method"])
+        auc = row.get("auc")
+        if auc is None:
+            continue
+        auc_value = float(auc)
+        max_auc_by_method[method] = max(max_auc_by_method.get(method, 0.0), auc_value)
+
+    generated_paths: List[Path] = []
+
+    for generated in (
+        _plot_utility_bars(utility_rows, args.out_dir, args.dpi),
+        _plot_attack_auc_bars(attack_rows, args.out_dir, args.dpi),
+        _plot_privacy_utility_scatter(utility_rows, max_auc_by_method, args.out_dir, args.dpi),
+    ):
+        if generated is not None:
+            generated_paths.append(generated)
+
+    sweep_csv = args.sweep_csv if args.sweep_csv is not None else discover_sweep_csv(args.results_dir)
+    if sweep_csv is not None and sweep_csv.exists():
+        sweep_rows = read_sweep_csv(sweep_csv)
+        heatmap = _plot_ssd_heatmap(sweep_rows, args.out_dir, args.dpi)
+        if heatmap is not None:
+            generated_paths.append(heatmap)
+
+    summary_csv = write_summary_csv(utility_rows, max_auc_by_method, args.out_dir)
+    generated_paths.append(summary_csv)
+
+    print("Generated files:")
+    for path in generated_paths:
+        print(f" - {path}")
+
+
+if __name__ == "__main__":
+    main()

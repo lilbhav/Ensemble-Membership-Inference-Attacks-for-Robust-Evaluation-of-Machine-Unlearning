@@ -16,22 +16,23 @@ model:
   pretrained: false
   checkpoint_path: "./checkpoints/full_model.pt"
 
-unlearning:
-  method: "ssd"   # [fine_tune, grad_ascent, scrub, ssd]
-  checkpoint_path: "/content/gdrive/My Drive/mia_checkpoints/ssd_unlearned_model.pt"
-  params:
-    lr: 0.1
-    dampening_constant: 1.0
-    selection_weighting: 10.0
 
-  # method: "scrub"   # [fine_tune, grad_ascent, scrub, ssd]
-  # checkpoint_path: "/content/gdrive/My Drive/mia_checkpoints/scrub_unlearned_model.pt"
-  # params:
-  #   epochs: 20
-  #   lr: 0.001
-  #   weight_decay: 0.0001
-  #   temperature: 6.0
-  #   dampening_factor: 1.0
+  #   method: "ssd"   # [fine_tune, grad_ascent, scrub, ssd]
+  #   checkpoint_path: "/content/gdrive/My Drive/mia_checkpoints/ssd_unlearned_model.pt"
+  #   params:
+  #     lr: 0.1
+  #     dampening_constant: 1.0
+  #     selection_weighting: 10.0
+  
+ unlearning:
+  method: "scrub"   # [fine_tune, grad_ascent, scrub, ssd]
+  checkpoint_path: "/content/gdrive/My Drive/mia_checkpoints/scrub_unlearned_model.pt"
+  params:
+    epochs: 20
+    lr: 0.001
+    weight_decay: 0.0001
+    temperature: 6.0
+    dampening_factor: 1.0
 
 mia:
   attacks:
