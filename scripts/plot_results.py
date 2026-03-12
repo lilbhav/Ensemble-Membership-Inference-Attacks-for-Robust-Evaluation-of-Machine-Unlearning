@@ -41,18 +41,114 @@ def parse_utility_metrics(results_txt: Path) -> Dict[str, Optional[float]]:
 
     for key in UTILITY_KEYS:
         # Captures patterns like "tr_acc: 0.8415" or "tr_acc = 0.8415".
-        metrics[key] = _extract_last_float(text, rf"\\b{key}\\b\\s*[:=]\\s*([0-9]*\\.?[0-9]+)")
+        metrics[key] = _extract_last_float(text, rf"\b{re.escape(key)}\b\s*[:=]\s*([0-9]*\.?[0-9]+)")
 
     if metrics["tr_acc"] is None:
         metrics["tr_acc"] = _extract_last_float(
-            text, r"Final\\s+train\\s+retain\\s+acc\\s*:\\s*([0-9]*\\.?[0-9]+)"
+            text, r"Final\s+train\s+retain\s+acc\s*:\s*([0-9]*\.?[0-9]+)"
         )
     if metrics["vf_acc"] is None:
         metrics["vf_acc"] = _extract_last_float(
-            text, r"Final\\s+valid\\s+forget\\s+acc\\s*:\\s*([0-9]*\\.?[0-9]+)"
+            text, r"Final\s+valid\s+forget\s+acc\s*:\s*([0-9]*\.?[0-9]+)"
         )
 
     return metrics
+
+
+def parse_baseline_utility_metrics(results_txt: Path) -> Dict[str, Optional[float]]:
+    """Parse baseline utility metrics needed for drop calculations."""
+    text = results_txt.read_text(encoding="utf-8", errors="ignore")
+
+    # Supports both formats:
+    #  - baseline | tr_acc: ... tf_acc: ... vr_acc: ...
+    #  - Baseline - tr_acc: ..., tf_acc: ..., vr_acc: ...
+    baseline_tf = _extract_last_float(
+        text,
+        r"baseline[^\n]*\btf_acc\b\s*[:=]\s*([0-9]*\.?[0-9]+)",
+    )
+    baseline_vr = _extract_last_float(
+        text,
+        r"baseline[^\n]*\bvr_acc\b\s*[:=]\s*([0-9]*\.?[0-9]+)",
+    )
+
+    return {
+        "baseline_tf_acc": baseline_tf,
+        "baseline_vr_acc": baseline_vr,
+    }
+
+
+def _safe_mean(values: List[float]) -> Optional[float]:
+    if not values:
+        return None
+    return float(sum(values) / len(values))
+
+
+def _safe_std(values: List[float], mean_value: Optional[float] = None) -> Optional[float]:
+    if not values:
+        return None
+    if mean_value is None:
+        mean_value = _safe_mean(values)
+    if mean_value is None:
+        return None
+    variance = sum((v - mean_value) ** 2 for v in values) / len(values)
+    return float(variance ** 0.5)
+
+
+def compute_method_attack_stats(
+    attack_rows: List[Dict[str, object]],
+) -> Dict[str, Dict[str, Optional[float]]]:
+    """Compute AUC spread/stability and ensemble gain per method."""
+    grouped: Dict[str, Dict[str, List[float]]] = {}
+
+    for row in attack_rows:
+        method = str(row.get("method"))
+        attack = str(row.get("attack", "")).lower()
+        auc = row.get("auc")
+        if auc is None:
+            continue
+        auc_value = float(auc)
+
+        if method not in grouped:
+            grouped[method] = {
+                "all": [],
+                "single": [],
+                "ensemble": [],
+            }
+
+        grouped[method]["all"].append(auc_value)
+        if attack in {"union", "voting"}:
+            grouped[method]["ensemble"].append(auc_value)
+        else:
+            grouped[method]["single"].append(auc_value)
+
+    stats: Dict[str, Dict[str, Optional[float]]] = {}
+    for method, values in grouped.items():
+        all_aucs = values["all"]
+        single_aucs = values["single"]
+        ensemble_aucs = values["ensemble"]
+
+        mean_auc = _safe_mean(all_aucs)
+        std_auc = _safe_std(all_aucs, mean_auc)
+        min_auc = float(min(all_aucs)) if all_aucs else None
+        max_auc = float(max(all_aucs)) if all_aucs else None
+
+        best_single_auc = float(max(single_aucs)) if single_aucs else None
+        best_ensemble_auc = float(max(ensemble_aucs)) if ensemble_aucs else None
+        ensemble_gain = None
+        if best_single_auc is not None and best_ensemble_auc is not None:
+            ensemble_gain = float(best_ensemble_auc - best_single_auc)
+
+        stats[method] = {
+            "auc_mean": mean_auc,
+            "auc_std": std_auc,
+            "auc_min": min_auc,
+            "auc_max": max_auc,
+            "best_single_attack_auc": best_single_auc,
+            "best_ensemble_auc": best_ensemble_auc,
+            "ensemble_gain": ensemble_gain,
+        }
+
+    return stats
 
 
 def parse_attack_metrics(attack_txt: Path) -> Dict[str, Dict[str, float]]:
@@ -67,10 +163,20 @@ def parse_attack_metrics(attack_txt: Path) -> Dict[str, Dict[str, float]]:
     value_re = re.compile(r"^\s*(auc|accuracy|tpr_at_fpr_0\.01|tpr_at_fpr_0\.001)\s*:\s*([0-9]*\.?[0-9]+)\s*$")
 
     for line in rows:
+        normalized_line = line.strip().lower()
+        if normalized_line.startswith("union") and "ensemble" in normalized_line and normalized_line.endswith(":"):
+            current_attack = "union"
+            metrics.setdefault(current_attack, {})
+            continue
+        if normalized_line.startswith("voting") and "ensemble" in normalized_line and normalized_line.endswith(":"):
+            current_attack = "voting"
+            metrics.setdefault(current_attack, {})
+            continue
+
         header_match = attack_header_re.match(line)
         if header_match:
             name = header_match.group(1).lower()
-            if name in {"shokri", "yeom", "lira", "union", "voting"}:
+            if name in {"shokri", "yeom", "lira", "calibration", "union", "voting"}:
                 current_attack = name
                 metrics.setdefault(current_attack, {})
             else:
@@ -247,16 +353,56 @@ def _plot_ssd_heatmap(sweep_rows: List[Dict[str, float]], out_dir: Path, dpi: in
 def write_summary_csv(
     utility_rows: List[Dict[str, object]],
     max_auc_by_method: Dict[str, float],
+    attack_stats_by_method: Dict[str, Dict[str, Optional[float]]],
+    privacy_lambda: float,
     out_dir: Path,
 ) -> Path:
     out_path = out_dir / "plot_data_summary.csv"
-    fieldnames = ["method", "tr_acc", "tf_acc", "vr_acc", "vf_acc", "max_attack_auc"]
+    fieldnames = [
+        "method",
+        "tr_acc",
+        "tf_acc",
+        "vr_acc",
+        "vf_acc",
+        "baseline_tf_acc",
+        "baseline_vr_acc",
+        "forget_drop",
+        "retain_drop",
+        "max_attack_auc",
+        "privacy_utility_score",
+        "auc_mean",
+        "auc_std",
+        "auc_min",
+        "auc_max",
+        "best_single_attack_auc",
+        "best_ensemble_auc",
+        "ensemble_gain",
+    ]
 
     with out_path.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=fieldnames)
         writer.writeheader()
         for row in utility_rows:
             method = str(row["method"])
+            baseline_tf = row.get("baseline_tf_acc")
+            baseline_vr = row.get("baseline_vr_acc")
+            final_tf = row.get("tf_acc")
+            final_vr = row.get("vr_acc")
+
+            forget_drop = None
+            if baseline_tf is not None and final_tf is not None:
+                forget_drop = float(baseline_tf) - float(final_tf)
+
+            retain_drop = None
+            if baseline_vr is not None and final_vr is not None:
+                retain_drop = float(baseline_vr) - float(final_vr)
+
+            max_attack_auc = max_auc_by_method.get(method)
+            privacy_utility_score = None
+            if max_attack_auc is not None and retain_drop is not None:
+                privacy_utility_score = float(max_attack_auc + privacy_lambda * retain_drop)
+
+            attack_stats = attack_stats_by_method.get(method, {})
             writer.writerow(
                 {
                     "method": method,
@@ -264,7 +410,19 @@ def write_summary_csv(
                     "tf_acc": row.get("tf_acc"),
                     "vr_acc": row.get("vr_acc"),
                     "vf_acc": row.get("vf_acc"),
-                    "max_attack_auc": max_auc_by_method.get(method),
+                    "baseline_tf_acc": baseline_tf,
+                    "baseline_vr_acc": baseline_vr,
+                    "forget_drop": forget_drop,
+                    "retain_drop": retain_drop,
+                    "max_attack_auc": max_attack_auc,
+                    "privacy_utility_score": privacy_utility_score,
+                    "auc_mean": attack_stats.get("auc_mean"),
+                    "auc_std": attack_stats.get("auc_std"),
+                    "auc_min": attack_stats.get("auc_min"),
+                    "auc_max": attack_stats.get("auc_max"),
+                    "best_single_attack_auc": attack_stats.get("best_single_attack_auc"),
+                    "best_ensemble_auc": attack_stats.get("best_ensemble_auc"),
+                    "ensemble_gain": attack_stats.get("ensemble_gain"),
                 }
             )
 
@@ -283,10 +441,12 @@ def build_records(results_dir: Path) -> Tuple[List[Dict[str, object]], List[Dict
         results_txt = method_dir / "results.txt"
         if results_txt.exists():
             utility = parse_utility_metrics(results_txt)
+            baseline_utility = parse_baseline_utility_metrics(results_txt)
             utility_rows.append(
                 {
                     "method": method,
                     **utility,
+                    **baseline_utility,
                 }
             )
 
@@ -334,6 +494,12 @@ def parse_args() -> argparse.Namespace:
         help="Optional path to ssd_sweep_summary.csv (auto-discovered if omitted)",
     )
     parser.add_argument("--dpi", type=int, default=180, help="DPI for saved PNG figures")
+    parser.add_argument(
+        "--privacy-lambda",
+        type=float,
+        default=1.0,
+        help="Lambda for privacy_utility_score = max_attack_auc + lambda * retain_drop",
+    )
     return parser.parse_args()
 
 
@@ -356,6 +522,8 @@ def main() -> None:
         auc_value = float(auc)
         max_auc_by_method[method] = max(max_auc_by_method.get(method, 0.0), auc_value)
 
+    attack_stats_by_method = compute_method_attack_stats(attack_rows)
+
     generated_paths: List[Path] = []
 
     for generated in (
@@ -373,7 +541,13 @@ def main() -> None:
         if heatmap is not None:
             generated_paths.append(heatmap)
 
-    summary_csv = write_summary_csv(utility_rows, max_auc_by_method, args.out_dir)
+    summary_csv = write_summary_csv(
+        utility_rows,
+        max_auc_by_method,
+        attack_stats_by_method,
+        args.privacy_lambda,
+        args.out_dir,
+    )
     generated_paths.append(summary_csv)
 
     print("Generated files:")

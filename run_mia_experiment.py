@@ -95,6 +95,62 @@ def _get_split_dir(config: Dict[str, Any]) -> str:
     return str(config.get('split_dir') or dataset_cfg.get('split_dir') or "./data/splits")
 
 
+def _minmax_normalize(scores: np.ndarray) -> np.ndarray:
+    """Min-max normalize a 1D score array to [0, 1]."""
+    min_score = float(np.min(scores))
+    max_score = float(np.max(scores))
+    if max_score <= min_score:
+        # Degenerate case: all scores are identical, use neutral confidence.
+        return np.full_like(scores, 0.5, dtype=float)
+    return (scores - min_score) / (max_score - min_score)
+
+
+def _build_score_based_ensembles(
+    attack_results: Dict[str, AttackResult],
+    k: int = 2,
+) -> Dict[str, Dict[str, np.ndarray]]:
+    """
+    Build score-based ensemble outputs from individual attack scores.
+
+    Returns dict entries with keys:
+      - "scores": continuous score used for ROC/AUC
+      - "predictions": hard labels used for accuracy
+    """
+    if not attack_results:
+        raise ValueError("No attack results available for ensemble construction")
+
+    normalized_scores = []
+    for result in attack_results.values():
+        combined_scores = np.concatenate([result.member_scores, result.nonmember_scores]).astype(float)
+        normalized_scores.append(_minmax_normalize(combined_scores))
+
+    scores_matrix = np.stack(normalized_scores, axis=0)
+    num_attacks = scores_matrix.shape[0]
+
+    if k > num_attacks:
+        raise ValueError(f"k ({k}) cannot be greater than number of attacks ({num_attacks})")
+
+    # Union score captures strongest membership evidence among attacks.
+    union_scores = np.max(scores_matrix, axis=0)
+    union_predictions = (union_scores >= 0.5).astype(int)
+
+    # Voting score uses vote ratio; hard prediction follows k-of-M rule.
+    vote_counts = np.sum(scores_matrix >= 0.5, axis=0)
+    voting_scores = vote_counts.astype(float) / float(num_attacks)
+    voting_predictions = (vote_counts >= k).astype(int)
+
+    return {
+        "union": {
+            "scores": union_scores,
+            "predictions": union_predictions,
+        },
+        "voting": {
+            "scores": voting_scores,
+            "predictions": voting_predictions,
+        },
+    }
+
+
 def create_model(architecture: str, dataset_name: str, device: str) -> torch.nn.Module:
     """Create a fresh model with given architecture and number of classes."""
     import torchvision.models as models
@@ -381,14 +437,20 @@ def run_mia_experiment(config_path: str,
         logger.info("\n" + "="*80)
         logger.info("ENSEMBLE RESULTS")
         logger.info("="*80)
+
+        ensemble_outputs = _build_score_based_ensembles(
+            attack_results=runner.attack_results,
+            k=2,
+        )
         
         # Union ensemble
-        union_pred, _ = runner.get_ensemble_predictions_union()
+        union_scores = ensemble_outputs["union"]["scores"]
+        union_pred = ensemble_outputs["union"]["predictions"]
         union_result = AttackResult(
             attack_name="union_ensemble",
             attack_config=AttackConfig(name="union_ensemble"),
-            member_scores=union_pred[:num_members].astype(float),
-            nonmember_scores=union_pred[num_members:].astype(float),
+            member_scores=union_scores[:num_members].astype(float),
+            nonmember_scores=union_scores[num_members:].astype(float),
             all_predictions=union_pred,
             member_indices=np.arange(num_members),
         )
@@ -399,12 +461,13 @@ def run_mia_experiment(config_path: str,
             logger.info(f"  {metric_name}: {metric_value:.4f}")
         
         # Voting ensemble
-        voting_pred, _ = runner.get_ensemble_predictions_voting(k=2)
+        voting_scores = ensemble_outputs["voting"]["scores"]
+        voting_pred = ensemble_outputs["voting"]["predictions"]
         voting_result = AttackResult(
             attack_name="voting_ensemble",
             attack_config=AttackConfig(name="voting_ensemble"),
-            member_scores=voting_pred[:num_members].astype(float),
-            nonmember_scores=voting_pred[num_members:].astype(float),
+            member_scores=voting_scores[:num_members].astype(float),
+            nonmember_scores=voting_scores[num_members:].astype(float),
             all_predictions=voting_pred,
             member_indices=np.arange(num_members),
         )

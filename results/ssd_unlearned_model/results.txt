@@ -1,9 +1,16 @@
 Loading dataset and creating splits...
-Files already downloaded and verified
+Loading retain/forget splits from disk (validated)...
 Running SSD unlearning...
-Baseline retain acc - train: 1.0000, valid: 1.0000
-{'lower_bound': 1, 'exponent': 1, 'magnitude_diff': None, 'min_layer': -1, 'max_layer': -1, 'forget_threshold': 1, 'dampening_constant': 1.0, 'selection_weighting': 10.0}
-   tr_acc: 1.0000
-   tf_acc: 1.0000
-   vr_acc: 1.0000
-   vf_acc: 1.0000
+Baseline retain acc - train: 0.8933, valid: 0.8870
+Baseline test acc: 0.8527
+   baseline | tr_acc: 0.8933 tf_acc: 0.8917 vr_acc: 0.8870 vf_acc: 0.9080
+   baseline | test_acc: 0.8527
+{'lower_bound': 1.0, 'exponent': 1.0, 'magnitude_diff': None, 'min_layer': -1, 'max_layer': -1, 'forget_threshold': 1.0, 'dampening_constant': 0.47, 'selection_weighting': 1.65}
+SSD update stats | selected_params: 831547/11173962 (7.4418%), tensors_touched: 53
+   after_ssd | tr_acc: 0.8902 tf_acc: 0.8897 vr_acc: 0.8842 vf_acc: 0.9010
+   after_ssd | test_acc: 0.8498
+   tr_acc: 0.8902
+   tf_acc: 0.8897
+   vr_acc: 0.8842
+   vf_acc: 0.9010
+   test_acc: 0.8498
