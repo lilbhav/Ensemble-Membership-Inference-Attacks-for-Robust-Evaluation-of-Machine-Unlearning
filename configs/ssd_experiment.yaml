@@ -9,7 +9,7 @@ source_checkpoint_cifar100: /content/gdrive/My Drive/mia_checkpoints/pretrained_
 model_path: /content/gdrive/My Drive/mia_checkpoints/finetuned_cifar10_from_cifar100.pt
 transfer_finetune_epochs: 10
 transfer_finetune_batch_size: 128
-transfer_finetune_learning_rate: 0.001
+transfer_finetune_learning_rate: 0.0005
 transfer_finetune_weight_decay: 0.0
 transfer_finetune_momentum: 0.9
 
@@ -27,13 +27,13 @@ results_path: /content/gdrive/My Drive/mia_checkpoints/ssd_results.txt
 learning_rate: 0.1
 
 # SSD parameters (requested)
-dampening_constant: 1
-selection_weighting: 5
+dampening_constant: 0.5
+selection_weighting: 2.0
 lower_bound: 1.0
 exponent: 1.0
 forget_threshold: 1.0
-min_layer: -1
-max_layer: -1
+min_layer: 3
+max_layer: 4
 
 eval_every: 1
 print_accuracies: true
