@@ -28,6 +28,7 @@ from mia.mia_runner import MIARunner, MIARunnerConfig, AttackConfig, AttackResul
 from mia.attack_integrations import AttackFactory
 from data.loaders import load_dataset, get_num_classes
 from utils.splits import ensure_retain_forget_split
+from utils.unlearning_setup import create_classwise_unlearning_splits
 
 
 def load_config(config_path: str) -> Dict[str, Any]:
@@ -93,6 +94,37 @@ def _get_split_dir(config: Dict[str, Any]) -> str:
     """
     dataset_cfg = config.get('dataset', {}) if isinstance(config.get('dataset', {}), dict) else {}
     return str(config.get('split_dir') or dataset_cfg.get('split_dir') or "./data/splits")
+
+
+def _get_dataset_cfg(config: Dict[str, Any]) -> Dict[str, Any]:
+    dataset_cfg = config.get('dataset', {})
+    if isinstance(dataset_cfg, dict):
+        return dataset_cfg
+    if isinstance(dataset_cfg, str):
+        return {'name': dataset_cfg}
+    return {}
+
+
+def _get_dataset_name(config: Dict[str, Any]) -> str:
+    dataset_cfg = _get_dataset_cfg(config)
+    return str(dataset_cfg.get('name', config.get('dataset_name', 'cifar10')))
+
+
+def _get_model_architecture(config: Dict[str, Any]) -> str:
+    model_cfg = config.get('model', {})
+    if isinstance(model_cfg, dict):
+        return str(model_cfg.get('architecture', config.get('model_architecture', 'resnet18')))
+    return str(config.get('model_architecture', 'resnet18'))
+
+
+def _get_unlearning_cfg(config: Dict[str, Any]) -> Dict[str, Any]:
+    return config.get('unlearning', {}) if isinstance(config.get('unlearning', {}), dict) else {}
+
+
+def _get_unlearning_params(config: Dict[str, Any]) -> Dict[str, Any]:
+    unlearning_cfg = _get_unlearning_cfg(config)
+    params = unlearning_cfg.get('params', {}) if isinstance(unlearning_cfg.get('params', {}), dict) else {}
+    return params
 
 
 def _minmax_normalize(scores: np.ndarray) -> np.ndarray:
@@ -174,12 +206,12 @@ def load_unlearned_model(config: Dict[str, Any], device: str) -> Optional[torch.
     """Try to load pre-unlearned model, or return None to use original."""
     logger = logging.getLogger(__name__)
     
-    unlearning_cfg = config.get('unlearning', {})
+    unlearning_cfg = _get_unlearning_cfg(config)
     method = unlearning_cfg.get('method', 'scrub')
     
     # Try to load pre-computed unlearned model
-    dataset_name = config['dataset']['name']
-    model_arch = config['model']['architecture']
+    dataset_name = _get_dataset_name(config)
+    model_arch = _get_model_architecture(config)
     
     possible_paths = [
         f"./checkpoints/{method}_unlearned_model.pt",
@@ -214,31 +246,51 @@ def prepare_data(config: Dict[str, Any]) -> tuple:
     
     logger.info("Loading dataset...")
     
-    dataset_cfg = config['dataset']
-    dataset_name = dataset_cfg['name']
+    dataset_cfg = _get_dataset_cfg(config)
+    dataset_name = _get_dataset_name(config)
     forget_fraction = dataset_cfg.get('forget_fraction', 0.2)
-    batch_size = config.get('batch_size', 64)
+    batch_size = int(config.get('batch_size', dataset_cfg.get('batch_size', 64)))
     seed = _get_seed(config)
     split_dir = _get_split_dir(config)
+    unlearning_params = _get_unlearning_params(config)
     
     # Load dataset - load_dataset() returns single dataset, not tuple
     train_data = load_dataset(dataset_name, train=True)
     test_data = load_dataset(dataset_name, train=False)
     
-    retain_data, forget_data, recreated = ensure_retain_forget_split(
-        train_data,
-        split_dir=split_dir,
-        forget_fraction=forget_fraction,
-        seed=seed,
-        verbose=False,
+    use_classwise_protocol = all(
+        key in unlearning_params for key in ['forget_class', 'retain_per_class', 'forget_count', 'left_out_per_class']
     )
-    if recreated:
+
+    if use_classwise_protocol:
+        retain_data, forget_data, left_out_data, _ = create_classwise_unlearning_splits(
+            dataset=train_data,
+            forget_class=int(unlearning_params['forget_class']),
+            retain_per_class=int(unlearning_params['retain_per_class']),
+            forget_count=int(unlearning_params['forget_count']),
+            left_out_per_class=int(unlearning_params['left_out_per_class']),
+            seed=seed,
+        )
+        recreated = False
         logger.info(
-            f"Created/recreated retain/forget splits in {split_dir} "
-            f"for seed={seed}, forget_fraction={forget_fraction}."
+            "Using classwise protocol splits from unlearning.params "
+            f"(retain={len(retain_data)}, forget={len(forget_data)}, left_out={len(left_out_data)})."
         )
     else:
-        logger.info(f"Loaded validated retain/forget splits from disk ({split_dir}).")
+        retain_data, forget_data, recreated = ensure_retain_forget_split(
+            train_data,
+            split_dir=split_dir,
+            forget_fraction=forget_fraction,
+            seed=seed,
+            verbose=False,
+        )
+        if recreated:
+            logger.info(
+                f"Created/recreated retain/forget splits in {split_dir} "
+                f"for seed={seed}, forget_fraction={forget_fraction}."
+            )
+        else:
+            logger.info(f"Loaded validated retain/forget splits from disk ({split_dir}).")
     
     logger.info(f"Dataset: {dataset_name}")
     logger.info(f"  Training samples: {len(train_data)}")
@@ -351,9 +403,9 @@ def run_mia_experiment(config_path: str,
     output_path = output_dir or config.get('output', {}).get('save_dir', './results/mia')
     
     mia_config = MIARunnerConfig(
-        dataset_name=config['dataset']['name'],
-        model_architecture=config['model'].get('architecture', 'resnet18'),
-        unlearning_method=config.get('unlearning', {}).get('method', 'unknown'),
+        dataset_name=_get_dataset_name(config),
+        model_architecture=_get_model_architecture(config),
+        unlearning_method=_get_unlearning_cfg(config).get('method', 'unknown'),
         attacks=attack_configs,
         device=device,
         seed=seed,
