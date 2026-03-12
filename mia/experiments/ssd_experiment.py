@@ -5,7 +5,7 @@ This mirrors the SCRUB experiment layout but uses SSD to dampen weights.
 
 import os
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Dict, Optional
 
 import torch
@@ -52,6 +52,11 @@ class SSDInput:
     split_dir: str = "./data/splits"
     device: Optional[str] = None
     results_path: Optional[str] = None
+    lower_bound: float = 1.0
+    exponent: float = 1.0
+    forget_threshold: float = 1.0
+    min_layer: int = -1
+    max_layer: int = -1
 
 
 class IndexedDataset(Dataset):
@@ -119,12 +124,12 @@ def ssd(loaders: Dict[str, DataLoader], args: SSDInput):
     test_loader = loaders["test_loader"]
 
     parameters = {
-        "lower_bound": 1,
-        "exponent": 1,
+        "lower_bound": args.lower_bound,
+        "exponent": args.exponent,
         "magnitude_diff": None,
-        "min_layer": -1,
-        "max_layer": -1,
-        "forget_threshold": 1,
+        "min_layer": args.min_layer,
+        "max_layer": args.max_layer,
+        "forget_threshold": args.forget_threshold,
         "dampening_constant": args.dampening_constant,
         "selection_weighting": args.selection_weighting,
     }
@@ -297,9 +302,45 @@ def main():
         default="./configs/ssd_experiment.yaml",
         help="Path to YAML config file",
     )
+    parser.add_argument(
+        "--dampening-constant",
+        type=float,
+        default=None,
+        help="Override dampening_constant from config",
+    )
+    parser.add_argument(
+        "--selection-weighting",
+        type=float,
+        default=None,
+        help="Override selection_weighting from config",
+    )
+    parser.add_argument(
+        "--lower-bound",
+        type=float,
+        default=None,
+        help="Override lower_bound from config",
+    )
+    parser.add_argument(
+        "--exponent",
+        type=float,
+        default=None,
+        help="Override exponent from config",
+    )
 
     cli_args = parser.parse_args()
     args = _load_config(cli_args.config)
+
+    overrides = {}
+    if cli_args.dampening_constant is not None:
+        overrides["dampening_constant"] = cli_args.dampening_constant
+    if cli_args.selection_weighting is not None:
+        overrides["selection_weighting"] = cli_args.selection_weighting
+    if cli_args.lower_bound is not None:
+        overrides["lower_bound"] = cli_args.lower_bound
+    if cli_args.exponent is not None:
+        overrides["exponent"] = cli_args.exponent
+    if overrides:
+        args = replace(args, **overrides)
 
     print("Loading dataset and creating splits...")
     loaders = _create_loaders(args)

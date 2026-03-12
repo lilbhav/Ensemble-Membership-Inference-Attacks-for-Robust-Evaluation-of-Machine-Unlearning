@@ -10,8 +10,13 @@ model_path: "/content/gdrive/My Drive/mia_checkpoints/pretrained_cifar10.pt"
 check_path: "/content/gdrive/My Drive/mia_checkpoints/ssd_unlearned_model.pt"
 results_path: "/content/gdrive/My Drive/mia_checkpoints/ssd_results.txt"
 learning_rate: 0.1
-dampening_constant: 1.0
-selection_weighting: 10.0
+dampening_constant: 0.2
+selection_weighting: 1.0
+lower_bound: 1.0
+exponent: 1.0
+forget_threshold: 1.0
+min_layer: -1
+max_layer: -1
 eval_every: 1
 print_accuracies: true
 device: null

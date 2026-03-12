@@ -11,3 +11,6 @@ data/splits/*.npy
 # Markdown files (except README)
 *.md
 !README.md
+
+# Generated visualization artifacts
+results/plots/
