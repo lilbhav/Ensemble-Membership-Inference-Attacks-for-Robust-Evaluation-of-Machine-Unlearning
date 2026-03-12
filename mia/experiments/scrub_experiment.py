@@ -563,8 +563,14 @@ def main():
     }
 
     print(f"Data loaders created. Training will start now...")
-    print(f"Configuration: epochs={args.epochs}, batch_size={args.batch_size}, "
-          f"device={torch.device('cuda' if torch.cuda.is_available() else 'cpu')}")
+    configured_epochs = int(getattr(args, "sgda_epochs", getattr(args, "epochs", 10)))
+    configured_retain_bs = int(getattr(args, "sgda_batch_size", getattr(args, "batch_size", 64)))
+    configured_forget_bs = int(getattr(args, "del_batch_size", max(1, configured_retain_bs // 2)))
+    print(
+        f"Configuration: sgda_epochs={configured_epochs}, "
+        f"retain_batch_size={configured_retain_bs}, forget_batch_size={configured_forget_bs}, "
+        f"device={torch.device('cuda' if torch.cuda.is_available() else 'cpu')}"
+    )
 
     # ========== 5. RUN SCRUB UNLEARNING ==========
     print("Running SCRUB unlearning...")
