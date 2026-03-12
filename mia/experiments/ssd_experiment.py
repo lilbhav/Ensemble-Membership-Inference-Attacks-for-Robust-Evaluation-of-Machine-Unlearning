@@ -114,6 +114,69 @@ def load_model(dataset: str, checkpoint_path: str, device: torch.device) -> nn.M
     return model.to(device)
 
 
+def _infer_layer_id(param_name: str) -> int:
+    """Infer a layer id from a parameter name for optional layer-range filtering."""
+    for token in param_name.split("."):
+        if token.isdigit():
+            return int(token)
+        if token.startswith("layer") and token[5:].isdigit():
+            return int(token[5:])
+    return -1
+
+
+def _apply_ssd_weight_update(
+    model: nn.Module,
+    original_importances: Dict[str, torch.Tensor],
+    forget_importances: Dict[str, torch.Tensor],
+    args: SSDInput,
+) -> Dict[str, float]:
+    """Apply SSD update with threshold and layer-range controls enforced in wrapper."""
+    total_params = 0
+    selected_params = 0
+    touched_tensors = 0
+
+    min_layer = int(args.min_layer)
+    max_layer = int(args.max_layer)
+    enforce_layer_range = min_layer >= 0 and max_layer >= 0 and max_layer >= min_layer
+
+    with torch.no_grad():
+        for name, p in model.named_parameters():
+            oimp = original_importances[name]
+            fimp = forget_importances[name]
+
+            if enforce_layer_range:
+                layer_id = _infer_layer_id(name)
+                if layer_id < min_layer or layer_id > max_layer:
+                    continue
+
+            total_params += int(p.numel())
+
+            # Selection mask: forget importance must exceed weighted original importance threshold.
+            selection_threshold = oimp.mul(args.selection_weighting * args.forget_threshold)
+            locations = fimp > selection_threshold
+            if not torch.any(locations):
+                continue
+
+            touched_tensors += 1
+            selected_params += int(locations.sum().item())
+
+            # Dampening factor from SSD equation; clamp denominator for numerical safety.
+            denom = torch.clamp(fimp[locations], min=1e-12)
+            update = ((oimp[locations].mul(args.dampening_constant)).div(denom)).pow(args.exponent)
+
+            # Bound by lower_bound to prevent parameter magnitudes from increasing.
+            update = torch.clamp(update, max=args.lower_bound)
+            p[locations] = p[locations].mul(update)
+
+    selected_ratio = (selected_params / total_params) if total_params > 0 else 0.0
+    return {
+        "selected_params": float(selected_params),
+        "total_params": float(total_params),
+        "selected_ratio": selected_ratio,
+        "touched_tensors": float(touched_tensors),
+    }
+
+
 def ssd(loaders: Dict[str, DataLoader], args: SSDInput):
     """Run SSD unlearning using the provided loaders and args."""
     train_loader = loaders["train_loader"]
@@ -168,7 +231,21 @@ def ssd(loaders: Dict[str, DataLoader], args: SSDInput):
     sample_importances = pdr.calc_importance(train_forget_loader)
     original_importances = pdr.calc_importance(train_loader)
 
-    pdr.modify_weight(original_importances, sample_importances)
+    update_stats = _apply_ssd_weight_update(
+        model=model,
+        original_importances=original_importances,
+        forget_importances=sample_importances,
+        args=args,
+    )
+    print(
+        "SSD update stats | selected_params: {selected:.0f}/{total:.0f} ({ratio:.4%}), "
+        "tensors_touched: {touched:.0f}".format(
+            selected=update_stats["selected_params"],
+            total=update_stats["total_params"],
+            ratio=update_stats["selected_ratio"],
+            touched=update_stats["touched_tensors"],
+        )
+    )
 
     acc_dict = train_validation(
         model,

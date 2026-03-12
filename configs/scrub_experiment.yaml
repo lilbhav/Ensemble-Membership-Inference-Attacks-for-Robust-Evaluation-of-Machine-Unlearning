@@ -22,6 +22,7 @@ forget_fraction: 0.2
 seed: 42
 split_dir: /content/gdrive/My Drive/mia_splits
 selection_weight: 1.8
+delta_selection_weight: 1.0
 min_selected_vr: 0.84
 min_forget_drop: 0.005
 max_retain_drop: 0.06

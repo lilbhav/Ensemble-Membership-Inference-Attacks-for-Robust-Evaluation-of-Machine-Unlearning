@@ -163,6 +163,7 @@ def scrub(loaders, args):
     losses, epoch_list = [], []
 
     selection_weight = float(getattr(args, "selection_weight", 1.0))
+    delta_selection_weight = float(getattr(args, "delta_selection_weight", 1.0))
     best_tradeoff_score = float("-inf")
     best_epoch = "retain:0"
     best_state_dict = None
@@ -172,11 +173,15 @@ def scrub(loaders, args):
     best_gap_score = float("-inf")
     best_gap_epoch = "none"
     best_gap_state = None
+    best_delta_score = float("-inf")
+    best_delta_epoch = "none"
+    best_delta_state = None
 
     def _update_selection_candidates(phase_label: str, acc_dict: dict) -> None:
         nonlocal best_tradeoff_score, best_epoch, best_state_dict
         nonlocal best_vf_under_retain_floor, best_epoch_under_retain_floor, best_state_under_retain_floor
         nonlocal best_gap_score, best_gap_epoch, best_gap_state
+        nonlocal best_delta_score, best_delta_epoch, best_delta_state
 
         tradeoff_score = float(acc_dict['vr_acc']) - selection_weight * float(acc_dict['vf_acc'])
         if tradeoff_score > best_tradeoff_score:
@@ -186,12 +191,25 @@ def scrub(loaders, args):
 
         # Baseline-aware constraints for random-sample unlearning selection.
         meets_baseline_constraints = True
+        retain_drop = 0.0
+        forget_drop = 0.0
         if base_acc is not None:
             retain_drop = float(base_acc['vr_acc']) - float(acc_dict['vr_acc'])
             forget_drop = float(base_acc['vf_acc']) - float(acc_dict['vf_acc'])
             meets_baseline_constraints = (
                 retain_drop <= max_retain_drop and forget_drop >= min_forget_drop
             )
+
+            # Positive is better: more forgetting with less retain damage.
+            delta_score = forget_drop - delta_selection_weight * retain_drop
+            if (
+                float(acc_dict['vr_acc']) >= min_selected_vr
+                and meets_baseline_constraints
+                and delta_score > best_delta_score
+            ):
+                best_delta_score = delta_score
+                best_delta_epoch = phase_label
+                best_delta_state = copy.deepcopy(model_s.state_dict())
 
         gap_score = float(acc_dict['vr_acc']) - float(acc_dict['vf_acc'])
         if (
@@ -342,7 +360,16 @@ def scrub(loaders, args):
 
         _update_selection_candidates(f"retain:{epoch}", acc_dict)
 
-    if best_gap_state is not None:
+    if best_delta_state is not None:
+        model_s.load_state_dict(best_delta_state)
+        print(
+            "Selected best epoch by delta criterion "
+            f"(maximize forget_drop - {delta_selection_weight:.2f}*retain_drop with "
+            f"vr_acc >= {min_selected_vr:.4f}, min_forget_drop >= {min_forget_drop:.4f}, "
+            f"max_retain_drop <= {max_retain_drop:.4f}): "
+            f"{best_delta_epoch} with score {best_delta_score:.4f}"
+        )
+    elif best_gap_state is not None:
         model_s.load_state_dict(best_gap_state)
         print(
             "Selected best epoch by constrained gap criterion "
@@ -399,6 +426,8 @@ def scrub(loaders, args):
         'best_vf_under_retain_floor': best_vf_under_retain_floor,
         'best_gap_epoch': best_gap_epoch,
         'best_gap_score': best_gap_score,
+        'best_delta_epoch': best_delta_epoch,
+        'best_delta_score': best_delta_score,
     }
 
     return model_s, history
