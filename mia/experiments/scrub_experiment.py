@@ -474,18 +474,43 @@ def main():
     print(f"  Forget set size: {len(forget_set)}")
     print(f"  Left-out set size: {len(left_out_set)}")
 
-    # Sanity checks for random-sample unlearning setup.
+    # Sanity checks for classwise protocol setup.
     retain_idx = set(getattr(retain_set, "indices", []))
     forget_idx = set(getattr(forget_set, "indices", []))
-    if retain_idx and forget_idx:
-        overlap = len(retain_idx.intersection(forget_idx))
-        if overlap != 0:
-            raise RuntimeError(f"Invalid split: retain/forget overlap detected ({overlap} samples).")
-        if len(retain_idx) + len(forget_idx) != len(dataset):
-            raise RuntimeError(
-                "Invalid split: retain+forget sizes do not cover the full dataset. "
-                f"retain={len(retain_idx)}, forget={len(forget_idx)}, total={len(dataset)}"
-            )
+    left_out_idx = set(getattr(left_out_set, "indices", []))
+
+    rf_overlap = len(retain_idx.intersection(forget_idx))
+    rl_overlap = len(retain_idx.intersection(left_out_idx))
+    fl_overlap = len(forget_idx.intersection(left_out_idx))
+    if rf_overlap != 0 or rl_overlap != 0 or fl_overlap != 0:
+        raise RuntimeError(
+            "Invalid split: overlap detected among retain/forget/left-out sets. "
+            f"retain-forget={rf_overlap}, retain-left_out={rl_overlap}, forget-left_out={fl_overlap}"
+        )
+
+    forget_class = int(getattr(args, "forget_class", 0))
+    retain_per_class = int(getattr(args, "retain_per_class", 100))
+    forget_count = int(getattr(args, "forget_count", 25))
+    left_out_per_class = int(getattr(args, "left_out_per_class", 25))
+    targets = np.asarray(getattr(dataset, "targets", []), dtype=np.int64)
+    num_classes = len(np.unique(targets)) if targets.size > 0 else get_num_classes(args.dataset)
+    non_forget_classes = max(num_classes - 1, 0)
+
+    expected_retain = non_forget_classes * retain_per_class
+    expected_left_out = non_forget_classes * left_out_per_class
+
+    if len(retain_set) != expected_retain:
+        raise RuntimeError(
+            f"Invalid retain set size: got {len(retain_set)}, expected {expected_retain}."
+        )
+    if len(forget_set) != forget_count:
+        raise RuntimeError(
+            f"Invalid forget set size: got {len(forget_set)}, expected {forget_count}."
+        )
+    if len(left_out_set) != expected_left_out:
+        raise RuntimeError(
+            f"Invalid left-out set size: got {len(left_out_set)}, expected {expected_left_out}."
+        )
 
     # ========== 3. FIXED PROTOCOL LOADERS ==========
     # Protocol:
