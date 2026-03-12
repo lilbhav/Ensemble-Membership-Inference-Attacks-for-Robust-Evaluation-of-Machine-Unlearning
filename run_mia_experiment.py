@@ -27,7 +27,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from mia.mia_runner import MIARunner, MIARunnerConfig, AttackConfig, AttackResult
 from mia.attack_integrations import AttackFactory
 from data.loaders import load_dataset, get_num_classes
-from utils.splits import create_retain_forget_split, load_split
+from utils.splits import ensure_retain_forget_split
 
 
 def load_config(config_path: str) -> Dict[str, Any]:
@@ -169,35 +169,20 @@ def prepare_data(config: Dict[str, Any]) -> tuple:
     train_data = load_dataset(dataset_name, train=True)
     test_data = load_dataset(dataset_name, train=False)
     
-    # Try to load existing splits first (from SCRUB unlearning)
-    if os.path.exists(os.path.join(split_dir, "forget_idx.npy")) and os.path.exists(os.path.join(split_dir, "retain_idx.npy")):
-        logger.info(f"Loading existing retain/forget splits from disk ({split_dir})...")
-        retain_data, forget_data = load_split(train_data, split_dir)
-
-        expected_forget = int(len(train_data) * forget_fraction)
-        expected_retain = len(train_data) - expected_forget
-        if len(forget_data) != expected_forget or len(retain_data) != expected_retain:
-            logger.warning(
-                "Existing split sizes do not match config forget_fraction. "
-                f"Expected retain/forget = {expected_retain}/{expected_forget}, "
-                f"got {len(retain_data)}/{len(forget_data)}. Recreating split for consistency."
-            )
-            retain_data, forget_data = create_retain_forget_split(
-                train_data,
-                forget_fraction=forget_fraction,
-                seed=seed,
-                save_dir=split_dir
-            )
-    else:
-        # Create new split if doesn't exist
-        logger.info(f"Creating retain/forget splits in {split_dir}...")
-        member_data, forget_data = create_retain_forget_split(
-            train_data,
-            forget_fraction=forget_fraction,
-            seed=seed,
-            save_dir=split_dir
+    retain_data, forget_data, recreated = ensure_retain_forget_split(
+        train_data,
+        split_dir=split_dir,
+        forget_fraction=forget_fraction,
+        seed=seed,
+        verbose=False,
+    )
+    if recreated:
+        logger.info(
+            f"Created/recreated retain/forget splits in {split_dir} "
+            f"for seed={seed}, forget_fraction={forget_fraction}."
         )
-        retain_data = member_data
+    else:
+        logger.info(f"Loaded validated retain/forget splits from disk ({split_dir}).")
     
     logger.info(f"Dataset: {dataset_name}")
     logger.info(f"  Training samples: {len(train_data)}")

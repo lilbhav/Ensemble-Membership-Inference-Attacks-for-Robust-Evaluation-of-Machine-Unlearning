@@ -20,7 +20,7 @@ if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
 from data.loaders import load_dataset, get_num_classes
-from utils.splits import create_retain_forget_split, load_split
+from utils.splits import ensure_retain_forget_split
 from utils.metrics import compute_accuracy, log_accuracies
 
 # Add SSD src to path for third-party import (after repo utils import to avoid shadowing)
@@ -204,20 +204,13 @@ def _create_loaders(args: SSDInput):
     test_dataset = load_dataset(dataset_name=args.dataset, root=args.dataroot, train=False)
 
     split_dir = args.split_dir
-    forget_idx_path = os.path.join(split_dir, "forget_idx.npy")
-    retain_idx_path = os.path.join(split_dir, "retain_idx.npy")
-
-    if os.path.exists(forget_idx_path) and os.path.exists(retain_idx_path):
-        print("Loading retain/forget splits from disk...")
-        retain_set, forget_set = load_split(dataset, split_dir)
-    else:
-        print("Creating retain/forget splits...")
-        retain_set, forget_set = create_retain_forget_split(
-            dataset,
-            forget_fraction=args.forget_fraction,
-            seed=args.seed,
-            save_dir=split_dir,
-        )
+    retain_set, forget_set, _ = ensure_retain_forget_split(
+        dataset,
+        split_dir=split_dir,
+        forget_fraction=args.forget_fraction,
+        seed=args.seed,
+        verbose=True,
+    )
 
     retain_len = len(retain_set)
     forget_len = len(forget_set)

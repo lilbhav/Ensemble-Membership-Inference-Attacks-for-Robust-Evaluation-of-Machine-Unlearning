@@ -15,7 +15,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 
 # Framework imports
 from data.loaders import load_dataset, get_num_classes
-from utils.splits import create_retain_forget_split, load_split
+from utils.splits import ensure_retain_forget_split
 from utils.metrics import compute_accuracy, log_accuracies
 from torch.utils.data import DataLoader, random_split
 import torchvision.models as models
@@ -436,20 +436,13 @@ def main():
 
     # ========== 2. CREATE SPLITS ==========
     split_dir = args.split_dir
-    forget_idx_path = os.path.join(split_dir, "forget_idx.npy")
-    retain_idx_path = os.path.join(split_dir, "retain_idx.npy")
-
-    if os.path.exists(forget_idx_path) and os.path.exists(retain_idx_path):
-        print("Loading retain/forget splits from disk...")
-        retain_set, forget_set = load_split(dataset, split_dir)
-    else:
-        print("Creating retain/forget splits...")
-        retain_set, forget_set = create_retain_forget_split(
-            dataset,
-            forget_fraction=args.forget_fraction,
-            seed=args.seed,
-            save_dir=split_dir,
-        )
+    retain_set, forget_set, _ = ensure_retain_forget_split(
+        dataset,
+        split_dir=split_dir,
+        forget_fraction=args.forget_fraction,
+        seed=args.seed,
+        verbose=True,
+    )
 
     print(f"  Retain set size: {len(retain_set)}")
     print(f"  Forget set size: {len(forget_set)}")
