@@ -11,7 +11,7 @@ from typing import Dict, Optional
 import torch
 import torch.nn as nn
 import torchvision.models as models
-from torch.utils.data import DataLoader, Dataset, Subset
+from torch.utils.data import DataLoader, Dataset, Subset, random_split
 import yaml
 
 # Add repo root to path for internal imports
@@ -21,6 +21,7 @@ if REPO_ROOT not in sys.path:
 
 from data.loaders import load_dataset, get_num_classes
 from utils.metrics import compute_accuracy, log_accuracies
+from utils.splits import ensure_retain_forget_split
 from utils.unlearning_setup import (
     create_classwise_unlearning_splits,
     load_or_create_transfer_model,
@@ -70,6 +71,7 @@ class SSDInput:
     transfer_finetune_learning_rate: float = 0.001
     transfer_finetune_weight_decay: float = 0.0
     transfer_finetune_momentum: float = 0.9
+    split_protocol: str = "random"
 
 
 class IndexedDataset(Dataset):
@@ -299,30 +301,66 @@ def _create_loaders(args: SSDInput):
     dataset = load_dataset(dataset_name=args.dataset, root=args.dataroot, train=True)
     test_dataset = load_dataset(dataset_name=args.dataset, root=args.dataroot, train=False)
 
-    retain_set, forget_set, left_out_set, split_info = create_classwise_unlearning_splits(
-        dataset=dataset,
-        forget_class=int(args.forget_class),
-        retain_per_class=int(args.retain_per_class),
-        forget_count=int(args.forget_count),
-        left_out_per_class=int(args.left_out_per_class),
-        seed=int(args.seed),
-    )
+    split_protocol = str(getattr(args, "split_protocol", "random")).strip().lower()
+    split_gen = torch.Generator().manual_seed(int(args.seed))
 
-    train_indices = split_info["retain_indices"] + split_info["forget_indices"]
-    train_subset = Subset(dataset, train_indices)
-
-    retain_train = retain_set
-    forget_train = forget_set
-    retain_val = left_out_set
-    forget_val = forget_set
-
-    print(
-        "Classwise protocol split sizes | retain: {retain}, forget: {forget}, left_out: {left}".format(
-            retain=len(retain_train),
-            forget=len(forget_train),
-            left=len(retain_val),
+    if split_protocol == "classwise":
+        retain_set, forget_set, left_out_set, split_info = create_classwise_unlearning_splits(
+            dataset=dataset,
+            forget_class=int(args.forget_class),
+            retain_per_class=int(args.retain_per_class),
+            forget_count=int(args.forget_count),
+            left_out_per_class=int(args.left_out_per_class),
+            seed=int(args.seed),
         )
-    )
+
+        train_indices = split_info["retain_indices"] + split_info["forget_indices"]
+        train_subset = Subset(dataset, train_indices)
+
+        retain_train = retain_set
+        forget_train = forget_set
+        retain_val = left_out_set
+        forget_val = forget_set
+
+        print(
+            "Classwise protocol split sizes | retain: {retain}, forget: {forget}, left_out: {left}".format(
+                retain=len(retain_train),
+                forget=len(forget_train),
+                left=len(retain_val),
+            )
+        )
+    else:
+        retain_set, forget_set, _ = ensure_retain_forget_split(
+            dataset,
+            split_dir=args.split_dir,
+            forget_fraction=float(args.forget_fraction),
+            seed=int(args.seed),
+            verbose=True,
+        )
+        retain_len = len(retain_set)
+        forget_len = len(forget_set)
+        retain_train_len = max(1, int(0.9 * retain_len)) if retain_len > 1 else retain_len
+        forget_train_len = max(1, int(0.9 * forget_len)) if forget_len > 1 else forget_len
+
+        retain_train, retain_val = random_split(
+            retain_set,
+            [retain_train_len, retain_len - retain_train_len],
+            generator=split_gen,
+        )
+        forget_train, forget_val = random_split(
+            forget_set,
+            [forget_train_len, forget_len - forget_train_len],
+            generator=split_gen,
+        )
+        train_subset = dataset
+        print(
+            "Random protocol split sizes | retain: {retain}, forget: {forget}, retain_val: {retain_val}, forget_val: {forget_val}".format(
+                retain=len(retain_train),
+                forget=len(forget_train),
+                retain_val=len(retain_val),
+                forget_val=len(forget_val),
+            )
+        )
 
     pin_memory = args.pin_memory and torch.cuda.is_available()
 

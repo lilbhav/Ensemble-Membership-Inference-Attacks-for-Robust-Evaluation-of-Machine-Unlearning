@@ -3,6 +3,8 @@
 dataset: cifar10
 dataroot: ./data/raw
 seed: 42
+split_protocol: random
+forget_fraction: 0.2
 
 # 1) Pre-train ResNet18 on CIFAR-100, replace final layer for CIFAR-10
 # 2) Fine-tune on CIFAR-10 and save to model_path if missing

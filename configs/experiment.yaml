@@ -20,6 +20,7 @@ unlearning:
   method: "scrub"   # [fine_tune, grad_ascent, scrub, ssd]
   checkpoint_path: "/content/gdrive/My Drive/mia_checkpoints/scrub_unlearned_model.pt"
   params:
+    split_protocol: "random"
     # SCRUB preset aligned with third-party flow
     # Data protocol
     forget_class: 0

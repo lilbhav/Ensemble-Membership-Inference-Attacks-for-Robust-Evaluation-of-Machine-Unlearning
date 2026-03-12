@@ -16,8 +16,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 # Framework imports
 from data.loaders import load_dataset, get_num_classes
 from utils.metrics import compute_accuracy, log_accuracies
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, random_split
 import torchvision.models as models
+from utils.splits import ensure_retain_forget_split
 from utils.unlearning_setup import (
     create_classwise_unlearning_splits,
     load_or_create_transfer_model,
@@ -461,69 +462,63 @@ def main():
     )
 
     # ========== 2. CREATE SPLITS ==========
-    retain_set, forget_set, left_out_set, _ = create_classwise_unlearning_splits(
-        dataset=dataset,
-        forget_class=int(getattr(args, "forget_class", 0)),
-        retain_per_class=int(getattr(args, "retain_per_class", 100)),
-        forget_count=int(getattr(args, "forget_count", 25)),
-        left_out_per_class=int(getattr(args, "left_out_per_class", 25)),
-        seed=int(args.seed),
-    )
+    split_protocol = str(getattr(args, "split_protocol", "random")).strip().lower()
+    split_generator = torch.Generator().manual_seed(int(args.seed))
 
-    print(f"  Retain set size: {len(retain_set)}")
-    print(f"  Forget set size: {len(forget_set)}")
-    print(f"  Left-out set size: {len(left_out_set)}")
-
-    # Sanity checks for classwise protocol setup.
-    retain_idx = set(getattr(retain_set, "indices", []))
-    forget_idx = set(getattr(forget_set, "indices", []))
-    left_out_idx = set(getattr(left_out_set, "indices", []))
-
-    rf_overlap = len(retain_idx.intersection(forget_idx))
-    rl_overlap = len(retain_idx.intersection(left_out_idx))
-    fl_overlap = len(forget_idx.intersection(left_out_idx))
-    if rf_overlap != 0 or rl_overlap != 0 or fl_overlap != 0:
-        raise RuntimeError(
-            "Invalid split: overlap detected among retain/forget/left-out sets. "
-            f"retain-forget={rf_overlap}, retain-left_out={rl_overlap}, forget-left_out={fl_overlap}"
+    if split_protocol == "classwise":
+        retain_set, forget_set, left_out_set, _ = create_classwise_unlearning_splits(
+            dataset=dataset,
+            forget_class=int(getattr(args, "forget_class", 0)),
+            retain_per_class=int(getattr(args, "retain_per_class", 100)),
+            forget_count=int(getattr(args, "forget_count", 25)),
+            left_out_per_class=int(getattr(args, "left_out_per_class", 25)),
+            seed=int(args.seed),
         )
 
-    forget_class = int(getattr(args, "forget_class", 0))
-    retain_per_class = int(getattr(args, "retain_per_class", 100))
-    forget_count = int(getattr(args, "forget_count", 25))
-    left_out_per_class = int(getattr(args, "left_out_per_class", 25))
-    targets = np.asarray(getattr(dataset, "targets", []), dtype=np.int64)
-    num_classes = len(np.unique(targets)) if targets.size > 0 else get_num_classes(args.dataset)
-    non_forget_classes = max(num_classes - 1, 0)
+        print(f"  Retain set size: {len(retain_set)}")
+        print(f"  Forget set size: {len(forget_set)}")
+        print(f"  Left-out set size: {len(left_out_set)}")
 
-    expected_retain = non_forget_classes * retain_per_class
-    expected_left_out = non_forget_classes * left_out_per_class
+        # Protocol:
+        # - retain_set is the training retain set
+        # - forget_set is used for forgetting and forget-evaluation
+        # - left_out_set is used as retain validation set
+        retain_train = retain_set
+        forget_train = forget_set
+        retain_val = left_out_set
+        forget_val = forget_set
 
-    if len(retain_set) != expected_retain:
-        raise RuntimeError(
-            f"Invalid retain set size: got {len(retain_set)}, expected {expected_retain}."
+        print(f"  Retain train: {len(retain_train)}, Retain val(left-out): {len(retain_val)}")
+        print(f"  Forget train: {len(forget_train)}, Forget val: {len(forget_val)}")
+    else:
+        retain_set, forget_set, _ = ensure_retain_forget_split(
+            dataset,
+            split_dir=args.split_dir,
+            forget_fraction=float(getattr(args, "forget_fraction", 0.2)),
+            seed=int(args.seed),
+            verbose=True,
         )
-    if len(forget_set) != forget_count:
-        raise RuntimeError(
-            f"Invalid forget set size: got {len(forget_set)}, expected {forget_count}."
-        )
-    if len(left_out_set) != expected_left_out:
-        raise RuntimeError(
-            f"Invalid left-out set size: got {len(left_out_set)}, expected {expected_left_out}."
-        )
+        print(f"  Split protocol: random")
+        print(f"  Retain set size: {len(retain_set)}")
+        print(f"  Forget set size: {len(forget_set)}")
 
-    # ========== 3. FIXED PROTOCOL LOADERS ==========
-    # Protocol:
-    # - retain_set is the training retain set
-    # - forget_set is used for forgetting and forget-evaluation
-    # - left_out_set is used as retain validation set
-    retain_train = retain_set
-    forget_train = forget_set
-    retain_val = left_out_set
-    forget_val = forget_set
+        retain_len = len(retain_set)
+        forget_len = len(forget_set)
+        retain_train_len = max(1, int(0.9 * retain_len)) if retain_len > 1 else retain_len
+        forget_train_len = max(1, int(0.9 * forget_len)) if forget_len > 1 else forget_len
 
-    print(f"  Retain train: {len(retain_train)}, Retain val(left-out): {len(retain_val)}")
-    print(f"  Forget train: {len(forget_train)}, Forget val: {len(forget_val)}")
+        retain_train, retain_val = random_split(
+            retain_set,
+            [retain_train_len, retain_len - retain_train_len],
+            generator=split_generator,
+        )
+        forget_train, forget_val = random_split(
+            forget_set,
+            [forget_train_len, forget_len - forget_train_len],
+            generator=split_generator,
+        )
+        print(f"  Retain train: {len(retain_train)}, Retain val: {len(retain_val)}")
+        print(f"  Forget train: {len(forget_train)}, Forget val: {len(forget_val)}")
 
     # ========== 4. CREATE DATA LOADERS ==========
     print("Creating data loaders...")
