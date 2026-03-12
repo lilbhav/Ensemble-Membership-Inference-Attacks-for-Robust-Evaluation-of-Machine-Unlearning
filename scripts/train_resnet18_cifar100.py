@@ -20,7 +20,7 @@ from data.loaders import get_num_classes
 
 
 def train_resnet18_cifar100(
-    num_epochs=12,
+    num_epochs=20,
     batch_size=128,
     learning_rate=0.1,
     output_checkpoint="/content/gdrive/My Drive/mia_checkpoints/pretrained_cifar100.pt"
@@ -166,7 +166,7 @@ def train_resnet18_cifar100(
 
 if __name__ == "__main__":
     model = train_resnet18_cifar100(
-        num_epochs=12,
+        num_epochs=20,
         batch_size=256,
         learning_rate=0.1,
         output_checkpoint="/content/gdrive/My Drive/mia_checkpoints/pretrained_cifar100.pt",
