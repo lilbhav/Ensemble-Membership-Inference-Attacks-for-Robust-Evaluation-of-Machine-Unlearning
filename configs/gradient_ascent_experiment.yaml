@@ -1,0 +1,17 @@
+# Gradient-ascent/descent baseline preset for random-sample unlearning.
+# Intended for Third_Party_Code/FT/baselines.py style runs.
+
+script_path: "./Third_Party_Code/FT/baselines.py"
+dataset: "sst2"
+model_checkpoints: "/content/gdrive/My Drive/mia_checkpoints/pretrained_model"
+output_path: "/content/gdrive/My Drive/mia_checkpoints/grad_ascent_descent_unlearned"
+
+# Supported values in baselines.py:
+# gradient_ascent, random_label, gradient_ascent_kl, gradient_ascent_descent
+unlearn_method: "gradient_ascent_descent"
+
+lr: 0.00005
+num_epochs: 3
+weight_decay: 0.001
+train_batch_size: 32
+eval_batch_size: 32

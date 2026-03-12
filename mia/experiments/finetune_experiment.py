@@ -71,6 +71,7 @@ class FineTuneInput:
     dataset: str
     dataroot: str
     forget_fraction: float
+    split_dir: str
     seed: int
     batch_size: int
     num_workers: int
@@ -228,6 +229,7 @@ def _load_config(config_path: str) -> FineTuneInput:
         "dataset",
         "dataroot",
         "forget_fraction",
+        "split_dir",
         "seed",
         "batch_size",
         "num_workers",
@@ -276,7 +278,7 @@ def main():
     )
 
     # ========== 2. CREATE SPLITS ==========
-    split_dir = "./data/splits"
+    split_dir = args.split_dir
     retain_set, forget_set, _ = ensure_retain_forget_split(
         dataset,
         split_dir=split_dir,
@@ -295,8 +297,17 @@ def main():
     retain_train_len = int(0.9 * retain_len)
     forget_train_len = int(0.9 * forget_len)
 
-    retain_train, retain_val = random_split(retain_set, [retain_train_len, retain_len - retain_train_len])
-    forget_train, forget_val = random_split(forget_set, [forget_train_len, forget_len - forget_train_len])
+    split_generator = torch.Generator().manual_seed(int(args.seed))
+    retain_train, retain_val = random_split(
+        retain_set,
+        [retain_train_len, retain_len - retain_train_len],
+        generator=split_generator,
+    )
+    forget_train, forget_val = random_split(
+        forget_set,
+        [forget_train_len, forget_len - forget_train_len],
+        generator=split_generator,
+    )
 
     print(f"  Retain train: {len(retain_train)}, Retain val: {len(retain_val)}")
     print(f"  Forget train: {len(forget_train)}, Forget val: {len(forget_val)}")

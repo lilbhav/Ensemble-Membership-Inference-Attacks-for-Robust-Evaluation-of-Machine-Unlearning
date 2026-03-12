@@ -20,11 +20,50 @@ unlearning:
   method: "scrub"   # [fine_tune, grad_ascent, scrub, ssd]
   checkpoint_path: "/content/gdrive/My Drive/mia_checkpoints/scrub_unlearned_model.pt"
   params:
-    epochs: 20
-    lr: 0.001
-    weight_decay: 0.0001
+    # Random-sample unlearning preset (SCRUB)
+    epochs: 3
+    lr: 0.0005
+    weight_decay: 0.0005
     temperature: 6.0
-    dampening_factor: 1.0
+    msteps: 1
+    forget_refresh_steps: 1
+    forget_refresh_every: 2
+    forget_lr_multiplier: 0.08
+    refresh_lr_multiplier: 0.02
+    selection_weight: 2.2
+    delta_selection_weight: 1.8
+    min_selected_vr: 0.86
+    min_forget_drop: 0.003
+    max_retain_drop: 0.04
+
+  # method: "ssd"
+  # checkpoint_path: "/content/gdrive/My Drive/mia_checkpoints/ssd_unlearned_model.pt"
+  # params:
+  #   lr: 0.1
+  #   dampening_constant: 0.47
+  #   selection_weighting: 1.65
+  #   lower_bound: 1.0
+  #   exponent: 1.0
+  #   forget_threshold: 1.0
+
+  # method: "fine_tune"
+  # checkpoint_path: "/content/gdrive/My Drive/mia_checkpoints/finetune_unlearned_model.pt"
+  # params:
+  #   lr: 0.00005
+  #   unlearn_epochs: 5
+  #   with_l1: true
+  #   alpha: 0.00005
+  #   no_l1_epochs: 2
+
+  # method: "grad_ascent"
+  # checkpoint_path: "/content/gdrive/My Drive/mia_checkpoints/grad_ascent_unlearned_model.pt"
+  # params:
+  #   # Third-party FT baseline options: gradient_ascent, gradient_ascent_descent, gradient_ascent_kl
+  #   unlearn_method: "gradient_ascent_descent"
+  #   num_epochs: 3
+  #   lr: 0.00005
+  #   train_batch_size: 32
+  #   eval_batch_size: 32
 
 #  method: "ssd"   # [fine_tune, grad_ascent, scrub, ssd]
 #     checkpoint_path: "/content/gdrive/My Drive/mia_checkpoints/ssd_unlearned_model.pt"

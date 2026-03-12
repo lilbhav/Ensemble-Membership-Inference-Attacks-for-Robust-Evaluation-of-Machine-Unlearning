@@ -1,16 +1,16 @@
 # Retain-optimized SCRUB config
 
-epochs: 4
+epochs: 3
 learning_rate: 0.0005
 batch_size: 128
 weight_decay: 0.0005
 
 kd_T: 6.0
-msteps: 2
+msteps: 1
 forget_refresh_steps: 1
-forget_refresh_every: 1
-forget_lr_multiplier: 0.12
-refresh_lr_multiplier: 0.03
+forget_refresh_every: 2
+forget_lr_multiplier: 0.08
+refresh_lr_multiplier: 0.02
 max_forget_loss_magnitude: 10000.0
 t_opt_gamma: 1.0
 t_opt_alpha: 1.0
@@ -21,11 +21,11 @@ model_path: /content/gdrive/My Drive/mia_checkpoints/pretrained_cifar10.pt
 forget_fraction: 0.2
 seed: 42
 split_dir: /content/gdrive/My Drive/mia_splits
-selection_weight: 1.8
-delta_selection_weight: 1.4
-min_selected_vr: 0.84
-min_forget_drop: 0.005
-max_retain_drop: 0.06
+selection_weight: 2.2
+delta_selection_weight: 1.8
+min_selected_vr: 0.86
+min_forget_drop: 0.003
+max_retain_drop: 0.04
 
 check_path: /content/gdrive/My Drive/mia_checkpoints/scrub_unlearned_model.pt
 results_path: ./results/scrub_unlearned_model/results.txt
