@@ -11,7 +11,7 @@ from typing import Dict, Optional
 import torch
 import torch.nn as nn
 import torchvision.models as models
-from torch.utils.data import DataLoader, Dataset, random_split
+from torch.utils.data import DataLoader, Dataset, Subset
 import yaml
 
 # Add repo root to path for internal imports
@@ -20,8 +20,11 @@ if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
 from data.loaders import load_dataset, get_num_classes
-from utils.splits import ensure_retain_forget_split
 from utils.metrics import compute_accuracy, log_accuracies
+from utils.unlearning_setup import (
+    create_classwise_unlearning_splits,
+    load_or_create_transfer_model,
+)
 
 # Add SSD src to path for third-party import (after repo utils import to avoid shadowing)
 SSD_SRC_DIR = os.path.join(
@@ -43,6 +46,7 @@ class SSDInput:
     num_workers: int
     pin_memory: bool
     model_path: str
+    source_checkpoint_cifar100: Optional[str]
     check_path: Optional[str]
     learning_rate: float
     dampening_constant: float
@@ -57,6 +61,15 @@ class SSDInput:
     forget_threshold: float = 1.0
     min_layer: int = -1
     max_layer: int = -1
+    forget_class: int = 0
+    retain_per_class: int = 100
+    forget_count: int = 25
+    left_out_per_class: int = 25
+    transfer_finetune_epochs: int = 10
+    transfer_finetune_batch_size: int = 128
+    transfer_finetune_learning_rate: float = 0.001
+    transfer_finetune_weight_decay: float = 0.0
+    transfer_finetune_momentum: float = 0.9
 
 
 class IndexedDataset(Dataset):
@@ -98,12 +111,6 @@ def load_model(dataset: str, checkpoint_path: str, device: torch.device) -> nn.M
     """Load a pre-trained model for the given dataset."""
     if dataset.lower() != "cifar10":
         raise ValueError(f"Unsupported dataset for SSD experiment: {dataset}")
-
-    if not os.path.exists(checkpoint_path):
-        raise FileNotFoundError(
-            f"Model checkpoint not found at {checkpoint_path}. "
-            "Please run: python scripts/train_resnet18_cifar10.py"
-        )
 
     model = models.resnet18(weights=None)
     model.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False)
@@ -203,7 +210,19 @@ def ssd(loaders: Dict[str, DataLoader], args: SSDInput):
         else torch.device("cuda" if torch.cuda.is_available() else "cpu")
     )
 
-    model = load_model(dataset=args.dataset, checkpoint_path=args.model_path, device=device)
+    model = load_or_create_transfer_model(
+        device=device,
+        cifar10_checkpoint_path=args.model_path,
+        source_checkpoint_cifar100=args.source_checkpoint_cifar100,
+        dataroot=args.dataroot,
+        finetune_epochs=int(args.transfer_finetune_epochs),
+        finetune_batch_size=int(args.transfer_finetune_batch_size),
+        finetune_learning_rate=float(args.transfer_finetune_learning_rate),
+        finetune_weight_decay=float(args.transfer_finetune_weight_decay),
+        finetune_momentum=float(args.transfer_finetune_momentum),
+        num_workers=int(args.num_workers),
+        pin_memory=bool(args.pin_memory),
+    )
     baseline_acc = train_validation(
         model,
         train_retain_loader,
@@ -280,39 +299,36 @@ def _create_loaders(args: SSDInput):
     dataset = load_dataset(dataset_name=args.dataset, root=args.dataroot, train=True)
     test_dataset = load_dataset(dataset_name=args.dataset, root=args.dataroot, train=False)
 
-    split_dir = args.split_dir
-    retain_set, forget_set, _ = ensure_retain_forget_split(
-        dataset,
-        split_dir=split_dir,
-        forget_fraction=args.forget_fraction,
-        seed=args.seed,
-        verbose=True,
+    retain_set, forget_set, left_out_set, split_info = create_classwise_unlearning_splits(
+        dataset=dataset,
+        forget_class=int(args.forget_class),
+        retain_per_class=int(args.retain_per_class),
+        forget_count=int(args.forget_count),
+        left_out_per_class=int(args.left_out_per_class),
+        seed=int(args.seed),
     )
 
-    retain_len = len(retain_set)
-    forget_len = len(forget_set)
+    train_indices = split_info["retain_indices"] + split_info["forget_indices"]
+    train_subset = Subset(dataset, train_indices)
 
-    retain_train_len = int(0.9 * retain_len)
-    forget_train_len = int(0.9 * forget_len)
+    retain_train = retain_set
+    forget_train = forget_set
+    retain_val = left_out_set
+    forget_val = forget_set
 
-    split_gen = torch.Generator().manual_seed(int(args.seed))
-
-    retain_train, retain_val = random_split(
-        retain_set,
-        [retain_train_len, retain_len - retain_train_len],
-        generator=split_gen,
-    )
-    forget_train, forget_val = random_split(
-        forget_set,
-        [forget_train_len, forget_len - forget_train_len],
-        generator=split_gen,
+    print(
+        "Classwise protocol split sizes | retain: {retain}, forget: {forget}, left_out: {left}".format(
+            retain=len(retain_train),
+            forget=len(forget_train),
+            left=len(retain_val),
+        )
     )
 
     pin_memory = args.pin_memory and torch.cuda.is_available()
 
     loaders = {
         "train_loader": DataLoader(
-            _wrap_dataset(dataset),
+            _wrap_dataset(train_subset),
             batch_size=args.batch_size,
             shuffle=True,
             num_workers=args.num_workers,

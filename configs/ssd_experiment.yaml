@@ -1,22 +1,40 @@
 dataset: cifar10
-dataroot: "./data/raw"
+dataroot: ./data/raw
 forget_fraction: 0.2
 seed: 42
-split_dir: "/content/gdrive/My Drive/mia_splits"
+
+# 1) Pre-train ResNet18 on CIFAR-100, replace final layer for CIFAR-10
+# 2) Fine-tune on CIFAR-10 and save to model_path if missing
+source_checkpoint_cifar100: /content/gdrive/My Drive/mia_checkpoints/pretrained_cifar100.pt
+model_path: /content/gdrive/My Drive/mia_checkpoints/finetuned_cifar10_from_cifar100.pt
+transfer_finetune_epochs: 10
+transfer_finetune_batch_size: 128
+transfer_finetune_learning_rate: 0.001
+transfer_finetune_weight_decay: 0.0
+transfer_finetune_momentum: 0.9
+
+# Classwise unlearning protocol
+forget_class: 0
+retain_per_class: 100
+forget_count: 25
+left_out_per_class: 25
+
 batch_size: 128
 num_workers: 2
 pin_memory: true
-model_path: "/content/gdrive/My Drive/mia_checkpoints/pretrained_cifar10.pt"
-check_path: "/content/gdrive/My Drive/mia_checkpoints/ssd_unlearned_model.pt"
-results_path: "/content/gdrive/My Drive/mia_checkpoints/ssd_results.txt"
+check_path: /content/gdrive/My Drive/mia_checkpoints/ssd_unlearned_model.pt
+results_path: /content/gdrive/My Drive/mia_checkpoints/ssd_results.txt
 learning_rate: 0.1
-dampening_constant: 0.47
-selection_weighting: 1.65
+
+# SSD parameters (requested)
+dampening_constant: 1
+selection_weighting: 5
 lower_bound: 1.0
 exponent: 1.0
 forget_threshold: 1.0
 min_layer: -1
 max_layer: -1
+
 eval_every: 1
 print_accuracies: true
 device: null

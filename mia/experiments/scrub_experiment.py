@@ -15,10 +15,13 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 
 # Framework imports
 from data.loaders import load_dataset, get_num_classes
-from utils.splits import ensure_retain_forget_split
 from utils.metrics import compute_accuracy, log_accuracies
-from torch.utils.data import DataLoader, random_split
+from torch.utils.data import DataLoader
 import torchvision.models as models
+from utils.unlearning_setup import (
+    create_classwise_unlearning_splits,
+    load_or_create_transfer_model,
+)
 
 # Third party code imports
 from Third_Party_Code.SCRUB.thirdparty.repdistiller.distiller_zoo.KD import DistillKL
@@ -48,27 +51,22 @@ def scrub(loaders, args):
     """
     Perform SCRUB unlearning using knowledge distillation.
     """
-    # Load a pre-trained ResNet-18 model checkpoint (CIFAR-10)
-    model_checkpoint = getattr(args, "model_path", "./models/pretrained_cifar10.pt")
-
-    if not os.path.exists(model_checkpoint):
-        raise FileNotFoundError(
-            f"Model checkpoint not found at {model_checkpoint}. "
-            f"Please run: python scripts/train_resnet18_cifar10.py"
-        )
-
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
-    # Create model architecture and adapt for CIFAR-10
-    model = models.resnet18(weights=None)
-    model.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False)
-    model.maxpool = nn.Identity()
-    model.fc = nn.Linear(model.fc.in_features, get_num_classes("cifar10"))
-
-    # Load checkpoint
-    model.load_state_dict(torch.load(model_checkpoint, map_location=device))
-    model = model.to(device)
+    model = load_or_create_transfer_model(
+        device=device,
+        cifar10_checkpoint_path=getattr(args, "model_path", "./models/finetuned_cifar10_from_cifar100.pt"),
+        source_checkpoint_cifar100=getattr(args, "source_checkpoint_cifar100", None),
+        dataroot=getattr(args, "dataroot", "./data/raw"),
+        finetune_epochs=int(getattr(args, "transfer_finetune_epochs", 10)),
+        finetune_batch_size=int(getattr(args, "transfer_finetune_batch_size", 128)),
+        finetune_learning_rate=float(getattr(args, "transfer_finetune_learning_rate", 0.001)),
+        finetune_weight_decay=float(getattr(args, "transfer_finetune_weight_decay", 0.0)),
+        finetune_momentum=float(getattr(args, "transfer_finetune_momentum", 0.9)),
+        num_workers=int(getattr(args, "num_workers", 2)),
+        pin_memory=bool(getattr(args, "pin_memory", True)),
+    )
 
     # Extract loaders
     train_forget_loader = loaders['train_forget_loader']
@@ -98,12 +96,14 @@ def scrub(loaders, args):
     except Exception as e:
         print(f"Warning: baseline evaluation failed: {e}")
 
-    # Hyperparameters
-    kd_T = args.kd_T
-    learning_rate = args.learning_rate
-    epochs = args.epochs
-    msteps = args.msteps
-    weight_decay = getattr(args, "weight_decay", 1e-4)
+    # Hyperparameters (SCRUB-style naming)
+    kd_T = float(getattr(args, "kd_T", 1.0))
+    learning_rate = float(getattr(args, "sgda_learning_rate", getattr(args, "learning_rate", 0.001)))
+    epochs = int(getattr(args, "sgda_epochs", getattr(args, "epochs", 10)))
+    msteps = int(getattr(args, "msteps", 10))
+    weight_decay = float(getattr(args, "sgda_weight_decay", getattr(args, "weight_decay", 0.0)))
+    momentum = float(getattr(args, "sgda_momentum", 0.9))
+    optimizer_name = str(getattr(args, "optim", "sgd")).lower()
     forget_refresh_steps = int(getattr(args, "forget_refresh_steps", 0))
     forget_refresh_every = int(getattr(args, "forget_refresh_every", 1))
     forget_lr_multiplier = float(getattr(args, "forget_lr_multiplier", 0.5))
@@ -132,30 +132,27 @@ def scrub(loaders, args):
     criterion_kd = DistillKL(kd_T)  # Placeholder for interface consistency
     criterion_list = nn.ModuleList([criterion_cls, criterion_div, criterion_kd])
 
+    def _make_optimizer(lr: float):
+        if optimizer_name == "sgd":
+            return optim.SGD(
+                trainable_list.parameters(),
+                lr=lr,
+                momentum=momentum,
+                weight_decay=weight_decay,
+                nesterov=True,
+            )
+        if optimizer_name == "adam":
+            return optim.Adam(
+                trainable_list.parameters(),
+                lr=lr,
+                weight_decay=weight_decay,
+            )
+        raise ValueError(f"Unsupported optimizer '{optimizer_name}'. Use 'sgd' or 'adam'.")
+
     # Optimizers
-    optimizer_forget = optim.SGD(
-        trainable_list.parameters(),
-        lr=learning_rate * forget_lr_multiplier,
-        momentum=0.9,
-        weight_decay=weight_decay,
-        nesterov=True,
-    )
-
-    optimizer_retain = optim.SGD(
-        trainable_list.parameters(),
-        lr=learning_rate,
-        momentum=0.9,
-        weight_decay=weight_decay,
-        nesterov=True,
-    )
-
-    optimizer_refresh = optim.SGD(
-        trainable_list.parameters(),
-        lr=learning_rate * refresh_lr_multiplier,
-        momentum=0.9,
-        weight_decay=weight_decay,
-        nesterov=True,
-    )
+    optimizer_forget = _make_optimizer(learning_rate * forget_lr_multiplier)
+    optimizer_retain = _make_optimizer(learning_rate)
+    optimizer_refresh = _make_optimizer(learning_rate * refresh_lr_multiplier)
 
     # Track metrics
     tf_accs, tr_accs, vf_accs, vr_accs = [], [], [], []
@@ -228,10 +225,10 @@ def scrub(loaders, args):
 
     # Training args
     t_opt = SimpleNamespace()
-    t_opt.distill = 'kd'
-    t_opt.gamma = args.t_opt_gamma
-    t_opt.alpha = args.t_opt_alpha
-    t_opt.beta = 0
+    t_opt.distill = str(getattr(args, "distill", "kd"))
+    t_opt.gamma = float(getattr(args, "gamma", getattr(args, "t_opt_gamma", 1.0)))
+    t_opt.alpha = float(getattr(args, "alpha", getattr(args, "t_opt_alpha", 0.9)))
+    t_opt.beta = float(getattr(args, "beta", 0.8))
     t_opt.print_freq = 0
 
     # =======================
@@ -464,17 +461,18 @@ def main():
     )
 
     # ========== 2. CREATE SPLITS ==========
-    split_dir = args.split_dir
-    retain_set, forget_set, _ = ensure_retain_forget_split(
-        dataset,
-        split_dir=split_dir,
-        forget_fraction=args.forget_fraction,
-        seed=args.seed,
-        verbose=True,
+    retain_set, forget_set, left_out_set, _ = create_classwise_unlearning_splits(
+        dataset=dataset,
+        forget_class=int(getattr(args, "forget_class", 0)),
+        retain_per_class=int(getattr(args, "retain_per_class", 100)),
+        forget_count=int(getattr(args, "forget_count", 25)),
+        left_out_per_class=int(getattr(args, "left_out_per_class", 25)),
+        seed=int(args.seed),
     )
 
     print(f"  Retain set size: {len(retain_set)}")
     print(f"  Forget set size: {len(forget_set)}")
+    print(f"  Left-out set size: {len(left_out_set)}")
 
     # Sanity checks for random-sample unlearning setup.
     retain_idx = set(getattr(retain_set, "indices", []))
@@ -489,58 +487,50 @@ def main():
                 f"retain={len(retain_idx)}, forget={len(forget_idx)}, total={len(dataset)}"
             )
 
-    # ========== 3. CREATE TRAIN/VAL SPLITS ==========
-    retain_len = len(retain_set)
-    forget_len = len(forget_set)
+    # ========== 3. FIXED PROTOCOL LOADERS ==========
+    # Protocol:
+    # - retain_set is the training retain set
+    # - forget_set is used for forgetting and forget-evaluation
+    # - left_out_set is used as retain validation set
+    retain_train = retain_set
+    forget_train = forget_set
+    retain_val = left_out_set
+    forget_val = forget_set
 
-    retain_train_len = int(0.9 * retain_len)
-    forget_train_len = int(0.9 * forget_len)
-
-    split_generator = torch.Generator().manual_seed(int(args.seed))
-    retain_train, retain_val = random_split(
-        retain_set,
-        [retain_train_len, retain_len - retain_train_len],
-        generator=split_generator,
-    )
-    forget_train, forget_val = random_split(
-        forget_set,
-        [forget_train_len, forget_len - forget_train_len],
-        generator=split_generator,
-    )
-
-    print(f"  Retain train: {len(retain_train)}, Retain val: {len(retain_val)}")
+    print(f"  Retain train: {len(retain_train)}, Retain val(left-out): {len(retain_val)}")
     print(f"  Forget train: {len(forget_train)}, Forget val: {len(forget_val)}")
 
     # ========== 4. CREATE DATA LOADERS ==========
     print("Creating data loaders...")
     pin_memory = args.pin_memory and torch.cuda.is_available()
+    sgda_batch_size = int(getattr(args, "sgda_batch_size", getattr(args, "batch_size", 64)))
+    del_batch_size = int(getattr(args, "del_batch_size", max(1, sgda_batch_size // 2)))
+
     loaders = {
         'train_retain_loader': DataLoader(
             retain_train,
-            batch_size=args.batch_size,
+            batch_size=sgda_batch_size,
             shuffle=True,
-            generator=split_generator,
             num_workers=args.num_workers,
             pin_memory=pin_memory
         ),
         'train_forget_loader': DataLoader(
             forget_train,
-            batch_size=args.batch_size,
+            batch_size=del_batch_size,
             shuffle=True,
-            generator=split_generator,
             num_workers=args.num_workers,
             pin_memory=pin_memory
         ),
         'valid_retain_loader': DataLoader(
             retain_val,
-            batch_size=args.batch_size,
+            batch_size=sgda_batch_size,
             shuffle=False,
             num_workers=args.num_workers,
             pin_memory=pin_memory
         ),
         'valid_forget_loader': DataLoader(
             forget_val,
-            batch_size=args.batch_size,
+            batch_size=del_batch_size,
             shuffle=False,
             num_workers=args.num_workers,
             pin_memory=pin_memory
