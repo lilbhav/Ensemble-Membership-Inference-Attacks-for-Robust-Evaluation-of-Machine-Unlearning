@@ -6,10 +6,10 @@ batch_size: 128
 weight_decay: 0.0005
 
 kd_T: 6.0
-msteps: 4
+msteps: 2
 forget_refresh_steps: 1
 forget_refresh_every: 1
-forget_lr_multiplier: 0.2
+forget_lr_multiplier: 0.12
 refresh_lr_multiplier: 0.03
 max_forget_loss_magnitude: 10000.0
 t_opt_gamma: 1.0
@@ -22,7 +22,7 @@ forget_fraction: 0.2
 seed: 42
 split_dir: /content/gdrive/My Drive/mia_splits
 selection_weight: 1.8
-delta_selection_weight: 1.0
+delta_selection_weight: 1.4
 min_selected_vr: 0.84
 min_forget_drop: 0.005
 max_retain_drop: 0.06

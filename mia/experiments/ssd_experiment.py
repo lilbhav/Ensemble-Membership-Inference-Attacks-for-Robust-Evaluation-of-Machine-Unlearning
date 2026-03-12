@@ -295,11 +295,17 @@ def _create_loaders(args: SSDInput):
     retain_train_len = int(0.9 * retain_len)
     forget_train_len = int(0.9 * forget_len)
 
+    split_gen = torch.Generator().manual_seed(int(args.seed))
+
     retain_train, retain_val = random_split(
-        retain_set, [retain_train_len, retain_len - retain_train_len]
+        retain_set,
+        [retain_train_len, retain_len - retain_train_len],
+        generator=split_gen,
     )
     forget_train, forget_val = random_split(
-        forget_set, [forget_train_len, forget_len - forget_train_len]
+        forget_set,
+        [forget_train_len, forget_len - forget_train_len],
+        generator=split_gen,
     )
 
     pin_memory = args.pin_memory and torch.cuda.is_available()
