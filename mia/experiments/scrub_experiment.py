@@ -424,7 +424,9 @@ def scrub(loaders, args):
 
     # Save student model
     if hasattr(args, 'check_path') and args.check_path is not None:
-        os.makedirs(os.path.dirname(args.check_path), exist_ok=True)
+        check_dir = os.path.dirname(args.check_path)
+        if check_dir:
+            os.makedirs(check_dir, exist_ok=True)
         torch.save(model_s.state_dict(), args.check_path)
 
     history = {
@@ -481,22 +483,32 @@ def main():
 
     # ========== 2. CREATE SPLITS ==========
     split_dir = args.split_dir
-    has_targeted_counts = all(
-        hasattr(args, k)
-        for k in ["forget_class", "forget_count"]
-    ) and (
-        hasattr(args, "retain_count") or hasattr(args, "retain_per_class")
-    ) and (
-        hasattr(args, "left_out_count") or hasattr(args, "left_out_per_class")
+    has_targeted_counts = (
+        getattr(args, "forget_class", None) is not None
+        and getattr(args, "forget_count", None) is not None
+        and (
+            getattr(args, "retain_count", None) is not None
+            or getattr(args, "retain_per_class", None) is not None
+        )
+        and (
+            getattr(args, "left_out_count", None) is not None
+            or getattr(args, "left_out_per_class", None) is not None
+        )
     )
 
     if has_targeted_counts:
         forget_class = int(args.forget_class)
         classes_excluding_forget = int(get_num_classes(args.dataset)) - 1
-        retain_count = int(getattr(args, "retain_count", int(args.retain_per_class) * classes_excluding_forget))
-        left_out_count = int(
-            getattr(args, "left_out_count", int(args.left_out_per_class) * classes_excluding_forget)
-        )
+        if getattr(args, "retain_count", None) is not None:
+            retain_count = int(args.retain_count)
+        else:
+            retain_count = int(args.retain_per_class) * classes_excluding_forget
+
+        if getattr(args, "left_out_count", None) is not None:
+            left_out_count = int(args.left_out_count)
+        else:
+            left_out_count = int(args.left_out_per_class) * classes_excluding_forget
+
         forget_count = int(args.forget_count)
 
         retain_set, forget_set, left_out_set, _ = ensure_targeted_random_unlearning_split(
@@ -541,18 +553,20 @@ def main():
 
     # ========== 4. CREATE DATA LOADERS ==========
     print("Creating data loaders...")
-    pin_memory = args.pin_memory and torch.cuda.is_available()
+    pin_memory = bool(getattr(args, "pin_memory", True)) and torch.cuda.is_available()
+    num_workers = int(getattr(args, "num_workers", 2))
+    base_batch_size = int(getattr(args, "batch_size", 64))
     split_generator = torch.Generator().manual_seed(int(args.seed))
 
-    sgda_batch_size = int(getattr(args, "sgda_batch_size", args.batch_size))
-    del_batch_size = int(getattr(args, "del_batch_size", args.batch_size))
+    sgda_batch_size = int(getattr(args, "sgda_batch_size", base_batch_size))
+    del_batch_size = int(getattr(args, "del_batch_size", base_batch_size))
     loaders = {
         'train_retain_loader': DataLoader(
             retain_set,
             batch_size=sgda_batch_size,
             shuffle=True,
             generator=split_generator,
-            num_workers=args.num_workers,
+            num_workers=num_workers,
             pin_memory=pin_memory
         ),
         'train_forget_loader': DataLoader(
@@ -560,27 +574,27 @@ def main():
             batch_size=del_batch_size,
             shuffle=True,
             generator=split_generator,
-            num_workers=args.num_workers,
+            num_workers=num_workers,
             pin_memory=pin_memory
         ),
         'valid_retain_loader': DataLoader(
             left_out_set,
             batch_size=sgda_batch_size,
             shuffle=False,
-            num_workers=args.num_workers,
+            num_workers=num_workers,
             pin_memory=pin_memory
         ),
         'valid_forget_loader': DataLoader(
             forget_set,
             batch_size=del_batch_size,
             shuffle=False,
-            num_workers=args.num_workers,
+            num_workers=num_workers,
             pin_memory=pin_memory
         ),
     }
 
     print(f"Data loaders created. Training will start now...")
-    print(f"Configuration: epochs={getattr(args, 'sgda_epochs', getattr(args, 'epochs', 10))}, batch_size={args.batch_size}, "
+    print(f"Configuration: epochs={getattr(args, 'sgda_epochs', getattr(args, 'epochs', 10))}, batch_size={base_batch_size}, "
           f"device={torch.device('cuda' if torch.cuda.is_available() else 'cpu')}")
 
     # ========== 5. RUN SCRUB UNLEARNING ==========
