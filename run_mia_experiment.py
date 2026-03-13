@@ -260,11 +260,10 @@ def prepare_data(config: Dict[str, Any]) -> tuple:
     
     split_protocol = str(unlearning_params.get('split_protocol', 'random')).strip().lower()
 
-    has_targeted_keys = (
-        unlearning_params.get('forget_class') is not None
-        and unlearning_params.get('forget_count') is not None
+    has_count_keys = (
+        unlearning_params.get('forget_count') is not None
         and (
-            has_count_keys = (
+            unlearning_params.get('retain_count') is not None
             or unlearning_params.get('retain_per_class') is not None
         )
         and (
@@ -273,36 +272,40 @@ def prepare_data(config: Dict[str, Any]) -> tuple:
         )
     )
 
-    if split_protocol == 'targeted_random' and has_targeted_keys:
+    if split_protocol == 'fully_random' and has_count_keys:
+        num_classes = get_num_classes(dataset_name)
+        forget_count = int(unlearning_params['forget_count'])
+        if unlearning_params.get('retain_count') is not None:
+            retain_count = int(unlearning_params['retain_count'])
+        else:
+            retain_count = int(unlearning_params['retain_per_class']) * (num_classes - 1)
+
+        if unlearning_params.get('left_out_count') is not None:
+            left_out_count = int(unlearning_params['left_out_count'])
+        else:
+            left_out_count = int(unlearning_params['left_out_per_class']) * (num_classes - 1)
+
+        retain_data, forget_data, left_out_data, recreated = ensure_fully_random_unlearning_split(
+            dataset=train_data,
+            split_dir=split_dir,
+            retain_count=retain_count,
+            forget_count=forget_count,
+            left_out_count=left_out_count,
+            seed=seed,
+            verbose=True,
+        )
+        logger.info(
+            "Fully-random split loaded: retain=%d, forget=%d, left_out=%d%s.",
+            len(retain_data), len(forget_data), len(left_out_data),
+            " (recreated)" if recreated else " (from disk)",
+        )
+        logger.info("  Forget set: %d (from any class)", len(forget_data))
+        logger.info("  Retain set (members): %d", len(retain_data))
+
+    elif split_protocol == 'targeted_random' and has_count_keys and unlearning_params.get('forget_class') is not None:
         num_classes = get_num_classes(dataset_name)
         forget_class = int(unlearning_params['forget_class'])
-            if split_protocol == 'fully_random' and has_count_keys:
-                num_classes = get_num_classes(dataset_name)
-                forget_count = int(unlearning_params['forget_count'])
-                if unlearning_params.get('retain_count') is not None:
-                    retain_count = int(unlearning_params['retain_count'])
-                else:
-                    retain_count = int(unlearning_params['retain_per_class']) * (num_classes - 1)
-                if unlearning_params.get('left_out_count') is not None:
-                    left_out_count = int(unlearning_params['left_out_count'])
-                else:
-                    left_out_count = int(unlearning_params['left_out_per_class']) * (num_classes - 1)
-
-                retain_data, forget_data, left_out_data, recreated = ensure_fully_random_unlearning_split(
-                    dataset=train_data,
-                    split_dir=split_dir,
-                    retain_count=retain_count,
-                    forget_count=forget_count,
-                    left_out_count=left_out_count,
-                    seed=seed,
-                    verbose=True,
-                )
-                logger.info(
-                    "Fully-random split loaded: retain=%d, forget=%d, left_out=%d%s.",
-                    len(retain_data), len(forget_data), len(left_out_data),
-                    " (recreated)" if recreated else " (from disk)",
-                )
-            elif split_protocol == 'targeted_random' and has_count_keys:
+        forget_count = int(unlearning_params['forget_count'])
         classes_excluding_forget = num_classes - 1
 
         if unlearning_params.get('retain_count') is not None:
@@ -330,12 +333,16 @@ def prepare_data(config: Dict[str, Any]) -> tuple:
             len(retain_data), len(forget_data), len(left_out_data),
             " (recreated)" if recreated else " (from disk)",
         )
+        logger.info("  Forget set: %d (target class=%d)", len(forget_data), forget_class)
+        logger.info("  Retain set (members): %d", len(retain_data))
+
     else:
-        if split_protocol == 'targeted_random':
+        if split_protocol in ['targeted_random', 'fully_random']:
             logger.warning(
-                "split_protocol=targeted_random requested but required keys are missing; "
-                "falling back to fraction-based random split."
+                "split_protocol=%s requested but required keys are missing; falling back to fraction-based random split.",
+                split_protocol,
             )
+
         logger.info(
             "Using random retain/forget split with forget_fraction=%s (split_protocol=%s).",
             forget_fraction,
@@ -355,24 +362,13 @@ def prepare_data(config: Dict[str, Any]) -> tuple:
             )
         else:
             logger.info(f"Loaded validated retain/forget splits from disk ({split_dir}).")
+
+        logger.info(f"  Forget set: {len(forget_data)} ({forget_fraction*100:.0f}%)")
+        logger.info(f"  Retain set (members): {len(retain_data)} ({(1-forget_fraction)*100:.0f}%)")
     
     logger.info(f"Dataset: {dataset_name}")
     logger.info(f"  Training samples: {len(train_data)}")
     logger.info(f"  Test samples: {len(test_data)}")
-    if use_classwise_protocol:
-        logger.info(
-            "  Forget set: %d (classwise forget_count=%d)",
-            len(forget_data),
-            int(unlearning_params.get('forget_count', len(forget_data))),
-        )
-        logger.info(
-            "  Retain set (members): %d (classwise retain_per_class=%s)",
-            len(retain_data),
-            unlearning_params.get('retain_per_class', 'n/a'),
-        )
-    else:
-        logger.info(f"  Forget set: {len(forget_data)} ({forget_fraction*100:.0f}%)")
-        logger.info(f"  Retain set (members): {len(retain_data)} ({(1-forget_fraction)*100:.0f}%)")
     
     # For MIA: members are RETAIN set (what SCRUB kept), non-members are TEST set
     member_loader = DataLoader(retain_data, batch_size=batch_size, shuffle=False)
