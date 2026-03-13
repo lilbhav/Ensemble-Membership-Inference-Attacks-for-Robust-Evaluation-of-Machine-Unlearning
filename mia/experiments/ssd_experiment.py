@@ -11,7 +11,7 @@ from typing import Dict, Optional
 import torch
 import torch.nn as nn
 import torchvision.models as models
-from torch.utils.data import DataLoader, Dataset, Subset, random_split
+from torch.utils.data import DataLoader, Dataset
 import yaml
 
 # Add repo root to path for internal imports
@@ -20,12 +20,9 @@ if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
 from data.loaders import load_dataset, get_num_classes
+from utils.splits import ensure_retain_forget_split, ensure_targeted_random_unlearning_split
 from utils.metrics import compute_accuracy, log_accuracies
-from utils.splits import ensure_retain_forget_split
-from utils.unlearning_setup import (
-    create_classwise_unlearning_splits,
-    load_or_create_transfer_model,
-)
+from utils.transfer_setup import ensure_cifar10_from_cifar100_transfer_checkpoint
 
 # Add SSD src to path for third-party import (after repo utils import to avoid shadowing)
 SSD_SRC_DIR = os.path.join(
@@ -34,7 +31,7 @@ SSD_SRC_DIR = os.path.join(
 if SSD_SRC_DIR not in sys.path:
     sys.path.insert(0, SSD_SRC_DIR)
 
-import ssd as ssd_file
+import ssd as ssd_file  # type: ignore[import-not-found]
 
 
 @dataclass
@@ -47,7 +44,6 @@ class SSDInput:
     num_workers: int
     pin_memory: bool
     model_path: str
-    source_checkpoint_cifar100: Optional[str]
     check_path: Optional[str]
     learning_rate: float
     dampening_constant: float
@@ -63,15 +59,16 @@ class SSDInput:
     min_layer: int = -1
     max_layer: int = -1
     forget_class: int = 0
-    retain_per_class: int = 100
-    forget_count: int = 25
-    left_out_per_class: int = 25
+    retain_count: Optional[int] = None
+    forget_count: Optional[int] = None
+    left_out_count: Optional[int] = None
+    retain_per_class: Optional[int] = None
+    left_out_per_class: Optional[int] = None
+    source_checkpoint_cifar100: Optional[str] = None
     transfer_finetune_epochs: int = 10
     transfer_finetune_batch_size: int = 128
     transfer_finetune_learning_rate: float = 0.001
-    transfer_finetune_weight_decay: float = 0.0
-    transfer_finetune_momentum: float = 0.9
-    split_protocol: str = "random"
+    rebuild_transfer_checkpoint: bool = False
 
 
 class IndexedDataset(Dataset):
@@ -114,12 +111,18 @@ def load_model(dataset: str, checkpoint_path: str, device: torch.device) -> nn.M
     if dataset.lower() != "cifar10":
         raise ValueError(f"Unsupported dataset for SSD experiment: {dataset}")
 
+    if not os.path.exists(checkpoint_path):
+        raise FileNotFoundError(
+            f"Model checkpoint not found at {checkpoint_path}. "
+            "Please provide model_path or configure source_checkpoint_cifar100 transfer setup."
+        )
+
     model = models.resnet18(weights=None)
     model.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False)
     model.maxpool = nn.Identity()
     model.fc = nn.Linear(model.fc.in_features, get_num_classes("cifar10"))
 
-    model.load_state_dict(torch.load(checkpoint_path, map_location=device, weights_only=True))
+    model.load_state_dict(torch.load(checkpoint_path, map_location=device))
     return model.to(device)
 
 
@@ -212,19 +215,7 @@ def ssd(loaders: Dict[str, DataLoader], args: SSDInput):
         else torch.device("cuda" if torch.cuda.is_available() else "cpu")
     )
 
-    model = load_or_create_transfer_model(
-        device=device,
-        cifar10_checkpoint_path=args.model_path,
-        source_checkpoint_cifar100=args.source_checkpoint_cifar100,
-        dataroot=args.dataroot,
-        finetune_epochs=int(args.transfer_finetune_epochs),
-        finetune_batch_size=int(args.transfer_finetune_batch_size),
-        finetune_learning_rate=float(args.transfer_finetune_learning_rate),
-        finetune_weight_decay=float(args.transfer_finetune_weight_decay),
-        finetune_momentum=float(args.transfer_finetune_momentum),
-        num_workers=int(args.num_workers),
-        pin_memory=bool(args.pin_memory),
-    )
+    model = load_model(dataset=args.dataset, checkpoint_path=args.model_path, device=device)
     baseline_acc = train_validation(
         model,
         train_retain_loader,
@@ -301,100 +292,92 @@ def _create_loaders(args: SSDInput):
     dataset = load_dataset(dataset_name=args.dataset, root=args.dataroot, train=True)
     test_dataset = load_dataset(dataset_name=args.dataset, root=args.dataroot, train=False)
 
-    split_protocol = str(getattr(args, "split_protocol", "random")).strip().lower()
-    split_gen = torch.Generator().manual_seed(int(args.seed))
+    split_dir = args.split_dir
+    has_targeted_counts = args.forget_count is not None and (
+        args.retain_count is not None or args.retain_per_class is not None
+    ) and (
+        args.left_out_count is not None or args.left_out_per_class is not None
+    )
 
-    if split_protocol == "classwise":
-        retain_set, forget_set, left_out_set, split_info = create_classwise_unlearning_splits(
-            dataset=dataset,
-            forget_class=int(args.forget_class),
-            retain_per_class=int(args.retain_per_class),
-            forget_count=int(args.forget_count),
-            left_out_per_class=int(args.left_out_per_class),
-            seed=int(args.seed),
+    if has_targeted_counts:
+        classes_excluding_forget = int(get_num_classes(args.dataset)) - 1
+        retain_count = int(
+            args.retain_count
+            if args.retain_count is not None
+            else int(args.retain_per_class) * classes_excluding_forget
         )
-
-        train_indices = split_info["retain_indices"] + split_info["forget_indices"]
-        train_subset = Subset(dataset, train_indices)
-
-        retain_train = retain_set
-        forget_train = forget_set
-        retain_val = left_out_set
-        forget_val = forget_set
-
+        left_out_count = int(
+            args.left_out_count
+            if args.left_out_count is not None
+            else int(args.left_out_per_class) * classes_excluding_forget
+        )
+        retain_set, forget_set, left_out_set, _ = ensure_targeted_random_unlearning_split(
+            dataset=dataset,
+            split_dir=split_dir,
+            forget_class=int(args.forget_class),
+            retain_count=retain_count,
+            forget_count=int(args.forget_count),
+            left_out_count=left_out_count,
+            seed=int(args.seed),
+            verbose=True,
+        )
         print(
-            "Classwise protocol split sizes | retain: {retain}, forget: {forget}, left_out: {left}".format(
-                retain=len(retain_train),
-                forget=len(forget_train),
-                left=len(retain_val),
-            )
+            "Using targeted-random protocol (not per-class quotas): "
+            f"retain={len(retain_set)}, forget={len(forget_set)}, left_out={len(left_out_set)}"
         )
     else:
         retain_set, forget_set, _ = ensure_retain_forget_split(
             dataset,
-            split_dir=args.split_dir,
-            forget_fraction=float(args.forget_fraction),
-            seed=int(args.seed),
+            split_dir=split_dir,
+            forget_fraction=args.forget_fraction,
+            seed=args.seed,
             verbose=True,
         )
-        retain_len = len(retain_set)
-        forget_len = len(forget_set)
-        retain_train_len = max(1, int(0.9 * retain_len)) if retain_len > 1 else retain_len
-        forget_train_len = max(1, int(0.9 * forget_len)) if forget_len > 1 else forget_len
-
-        retain_train, retain_val = random_split(
+        split_gen = torch.Generator().manual_seed(int(args.seed))
+        retain_train_len = int(0.9 * len(retain_set))
+        retain_set, left_out_set = torch.utils.data.random_split(
             retain_set,
-            [retain_train_len, retain_len - retain_train_len],
+            [retain_train_len, len(retain_set) - retain_train_len],
             generator=split_gen,
         )
-        forget_train, forget_val = random_split(
-            forget_set,
-            [forget_train_len, forget_len - forget_train_len],
-            generator=split_gen,
-        )
-        train_subset = dataset
         print(
-            "Random protocol split sizes | retain: {retain}, forget: {forget}, retain_val: {retain_val}, forget_val: {forget_val}".format(
-                retain=len(retain_train),
-                forget=len(forget_train),
-                retain_val=len(retain_val),
-                forget_val=len(forget_val),
-            )
+            "Using fallback random protocol: "
+            f"retain={len(retain_set)}, forget={len(forget_set)}, left_out={len(left_out_set)}"
         )
 
     pin_memory = args.pin_memory and torch.cuda.is_available()
 
     loaders = {
         "train_loader": DataLoader(
-            _wrap_dataset(train_subset),
+            _wrap_dataset(dataset),
             batch_size=args.batch_size,
             shuffle=True,
             num_workers=args.num_workers,
             pin_memory=pin_memory,
         ),
         "train_retain_loader": DataLoader(
-            _wrap_dataset(retain_train),
+            _wrap_dataset(retain_set),
             batch_size=args.batch_size,
             shuffle=True,
             num_workers=args.num_workers,
             pin_memory=pin_memory,
         ),
         "train_forget_loader": DataLoader(
-            _wrap_dataset(forget_train),
+            _wrap_dataset(forget_set),
             batch_size=args.batch_size,
             shuffle=True,
             num_workers=args.num_workers,
             pin_memory=pin_memory,
         ),
         "valid_retain_loader": DataLoader(
-            _wrap_dataset(retain_val),
+            _wrap_dataset(left_out_set),
             batch_size=args.batch_size,
             shuffle=False,
             num_workers=args.num_workers,
             pin_memory=pin_memory,
         ),
         "valid_forget_loader": DataLoader(
-            _wrap_dataset(forget_val),
+            _wrap_dataset(forget_set),
             batch_size=args.batch_size,
             shuffle=False,
             num_workers=args.num_workers,
@@ -471,6 +454,22 @@ def main():
         overrides["exponent"] = cli_args.exponent
     if overrides:
         args = replace(args, **overrides)
+
+    if args.source_checkpoint_cifar100:
+        target_model_path = ensure_cifar10_from_cifar100_transfer_checkpoint(
+            source_checkpoint_cifar100=args.source_checkpoint_cifar100,
+            target_checkpoint_cifar10=args.model_path,
+            dataroot=args.dataroot,
+            finetune_epochs=int(args.transfer_finetune_epochs),
+            finetune_batch_size=int(args.transfer_finetune_batch_size),
+            finetune_learning_rate=float(args.transfer_finetune_learning_rate),
+            seed=int(args.seed),
+            num_workers=int(args.num_workers),
+            pin_memory=bool(args.pin_memory),
+            force_rebuild=bool(args.rebuild_transfer_checkpoint),
+        )
+        if target_model_path != args.model_path:
+            args = replace(args, model_path=target_model_path)
 
     print("Loading dataset and creating splits...")
     loaders = _create_loaders(args)

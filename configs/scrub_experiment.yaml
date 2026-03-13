@@ -1,28 +1,32 @@
-# SCRUB config using CIFAR-100 -> CIFAR-10 transfer setup
-
 dataset: cifar10
-dataroot: ./data/raw
+dataroot: /content/data/raw
 seed: 42
-split_protocol: random
-forget_fraction: 0.2
+split_dir: /content/gdrive/My Drive/mia_splits/scrub_targeted_random
 
-# 1) Pre-train ResNet18 on CIFAR-100, replace final layer for CIFAR-10
-# 2) Fine-tune on CIFAR-10 and save to model_path if missing
-source_checkpoint_cifar100: null
-model_path: /content/gdrive/My Drive/mia_checkpoints/pretrained_cifar10.pt
+# Transfer setup: pretrain on CIFAR-100, replace final layer, fine-tune on CIFAR-10.
+source_checkpoint_cifar100: /content/gdrive/My Drive/mia_checkpoints/pretrained_cifar100.pt
+model_path: /content/gdrive/My Drive/mia_checkpoints/finetuned_cifar10_from_cifar100.pt
 transfer_finetune_epochs: 10
 transfer_finetune_batch_size: 128
 transfer_finetune_learning_rate: 0.001
-transfer_finetune_weight_decay: 0.0
-transfer_finetune_momentum: 0.9
+rebuild_transfer_checkpoint: false
 
-# Classwise unlearning protocol
+# Targeted random split setup (random samples, not per-class quotas).
 forget_class: 0
-retain_per_class: 100
+retain_count: 900
 forget_count: 25
-left_out_per_class: 25
+left_out_count: 225
 
-# SCRUB hyperparameters (requested)
+check_path: /content/gdrive/My Drive/mia_checkpoints/scrub_unlearned_model.pt
+results_path: /content/gdrive/My Drive/mia_checkpoints/scrub_results.txt
+print_accuracies: true
+
+batch_size: 128
+num_workers: 2
+pin_memory: true
+eval_every: 1
+
+# SCRUB hyperparameters
 optim: sgd
 gamma: 1
 alpha: 0.9
@@ -42,22 +46,9 @@ lr_decay_rate: 0
 sgda_weight_decay: 0
 sgda_momentum: 0.9
 
-# Existing selection controls retained
+# Optional selection controls
 selection_weight: 2.2
 delta_selection_weight: 1.8
-min_selected_vr: 0.86
-min_forget_drop: 0.003
-max_retain_drop: 0.04
-forget_refresh_steps: 1
-forget_refresh_every: 2
-forget_lr_multiplier: 0.5
-refresh_lr_multiplier: 0.05
-max_forget_loss_magnitude: 10000.0
-
-check_path: /content/gdrive/My Drive/mia_checkpoints/scrub_unlearned_model.pt
-results_path: /content/gdrive/My Drive/mia_checkpoints/scrub_results.txt
-print_accuracies: true
-
-eval_every: 1
-num_workers: 2
-pin_memory: true
+min_selected_vr: 0.0
+min_forget_drop: 0.0
+max_retain_drop: 1.0
