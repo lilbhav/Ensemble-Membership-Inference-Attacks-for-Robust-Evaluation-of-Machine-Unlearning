@@ -28,17 +28,19 @@ learning_rate: 0.1
 # SSD parameters.
 # selection_weighting (alpha): parameter selected only if forget_importance > alpha * retain_importance.
 #   Higher = fewer parameters touched = safer for retain accuracy.
-#   SSD paper used alpha=10 for full-class forgetting (~5000 samples). With only 25 forget
-#   samples the Fisher estimate is noisy, so a higher threshold is needed.
+#   The SSD paper used alpha=10 for full-class forgetting (~5000 samples). With only 25 forget
+#   samples the forget Fisher is computed over 1 batch while the retain Fisher is computed over
+#   ~391 batches, so the raw magnitudes are ~391x less normalized. A much higher alpha is needed
+#   to compensate for this scale imbalance and avoid catching shared parameters.
 # dampening_constant (lambda): dampening scale = (lambda * retain_imp / forget_imp)^exponent.
-#   Lower = less aggressive dampening.
+#   Lower = less aggressive dampening on selected params.
 lower_bound: 1.0
 exponent: 1.0
 forget_threshold: 1.0
 min_layer: -1
 max_layer: -1
 dampening_constant: 1
-selection_weighting: 10
+selection_weighting: 100
 
 eval_every: 1
 print_accuracies: true
