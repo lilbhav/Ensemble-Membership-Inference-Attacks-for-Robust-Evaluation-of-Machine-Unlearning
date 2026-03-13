@@ -283,6 +283,25 @@ class ReferenceAttackWrapper:
                 torch.cat([train_labels, test_labels], dim=0),
             )
             num_member = len(train_dataset)
+
+            # Classwise unlearning can omit one class from member data (e.g., forget_class).
+            # The reference Shokri implementation expects an attack model per label at inference.
+            # If any labels are missing, clone a fallback model to avoid KeyError and keep the
+            # attack execution deterministic.
+            required_labels = set(int(v) for v in torch.unique(torch.cat([train_labels, test_labels], dim=0)).tolist())
+            present_labels = set(int(k) for k in attack.attack_model_dict.keys())
+            missing_labels = sorted(required_labels.difference(present_labels))
+            if missing_labels and present_labels:
+                fallback_label = sorted(present_labels)[0]
+                fallback_model = attack.attack_model_dict[fallback_label]
+                for missing_label in missing_labels:
+                    attack.attack_model_dict[missing_label] = copy.deepcopy(fallback_model)
+                self.logger.warning(
+                    "Shokri attack models missing labels %s; reusing fallback model from label %s.",
+                    missing_labels,
+                    fallback_label,
+                )
+
             try:
                 with torch.serialization.safe_globals([AttackTrainingSet]):
                     combined_scores = attack.infer(combined_dataset)

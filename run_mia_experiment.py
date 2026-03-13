@@ -258,9 +258,16 @@ def prepare_data(config: Dict[str, Any]) -> tuple:
     train_data = load_dataset(dataset_name, train=True)
     test_data = load_dataset(dataset_name, train=False)
     
-    use_classwise_protocol = all(
+    split_protocol = str(unlearning_params.get('split_protocol', 'random')).strip().lower()
+    has_classwise_keys = all(
         key in unlearning_params for key in ['forget_class', 'retain_per_class', 'forget_count', 'left_out_per_class']
     )
+    use_classwise_protocol = split_protocol == 'classwise' and has_classwise_keys
+
+    if split_protocol == 'classwise' and not has_classwise_keys:
+        logger.warning(
+            "split_protocol=classwise requested but classwise keys are missing; falling back to random split."
+        )
 
     if use_classwise_protocol:
         retain_data, forget_data, left_out_data, _ = create_classwise_unlearning_splits(
@@ -277,6 +284,11 @@ def prepare_data(config: Dict[str, Any]) -> tuple:
             f"(retain={len(retain_data)}, forget={len(forget_data)}, left_out={len(left_out_data)})."
         )
     else:
+        logger.info(
+            "Using random retain/forget split with forget_fraction=%s (split_protocol=%s).",
+            forget_fraction,
+            split_protocol,
+        )
         retain_data, forget_data, recreated = ensure_retain_forget_split(
             train_data,
             split_dir=split_dir,
@@ -295,8 +307,20 @@ def prepare_data(config: Dict[str, Any]) -> tuple:
     logger.info(f"Dataset: {dataset_name}")
     logger.info(f"  Training samples: {len(train_data)}")
     logger.info(f"  Test samples: {len(test_data)}")
-    logger.info(f"  Forget set: {len(forget_data)} ({forget_fraction*100:.0f}%)")
-    logger.info(f"  Retain set (members): {len(retain_data)} ({(1-forget_fraction)*100:.0f}%)")
+    if use_classwise_protocol:
+        logger.info(
+            "  Forget set: %d (classwise forget_count=%d)",
+            len(forget_data),
+            int(unlearning_params.get('forget_count', len(forget_data))),
+        )
+        logger.info(
+            "  Retain set (members): %d (classwise retain_per_class=%s)",
+            len(retain_data),
+            unlearning_params.get('retain_per_class', 'n/a'),
+        )
+    else:
+        logger.info(f"  Forget set: {len(forget_data)} ({forget_fraction*100:.0f}%)")
+        logger.info(f"  Retain set (members): {len(retain_data)} ({(1-forget_fraction)*100:.0f}%)")
     
     # For MIA: members are RETAIN set (what SCRUB kept), non-members are TEST set
     member_loader = DataLoader(retain_data, batch_size=batch_size, shuffle=False)

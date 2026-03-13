@@ -8,8 +8,8 @@ forget_fraction: 0.2
 
 # 1) Pre-train ResNet18 on CIFAR-100, replace final layer for CIFAR-10
 # 2) Fine-tune on CIFAR-10 and save to model_path if missing
-source_checkpoint_cifar100: /content/gdrive/My Drive/mia_checkpoints/pretrained_cifar100.pt
-model_path: /content/gdrive/My Drive/mia_checkpoints/finetuned_cifar10_from_cifar100.pt
+source_checkpoint_cifar100: null
+model_path: /content/gdrive/My Drive/mia_checkpoints/pretrained_cifar10.pt
 transfer_finetune_epochs: 10
 transfer_finetune_batch_size: 128
 transfer_finetune_learning_rate: 0.001
