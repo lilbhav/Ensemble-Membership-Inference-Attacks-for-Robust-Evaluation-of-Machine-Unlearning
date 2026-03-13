@@ -27,8 +27,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from mia.mia_runner import MIARunner, MIARunnerConfig, AttackConfig, AttackResult
 from mia.attack_integrations import AttackFactory
 from data.loaders import load_dataset, get_num_classes
-from utils.splits import ensure_retain_forget_split
-from utils.unlearning_setup import create_classwise_unlearning_splits
+from utils.splits import ensure_retain_forget_split, ensure_targeted_random_unlearning_split, ensure_fully_random_unlearning_split
 
 
 def load_config(config_path: str) -> Dict[str, Any]:
@@ -255,35 +254,88 @@ def prepare_data(config: Dict[str, Any]) -> tuple:
     unlearning_params = _get_unlearning_params(config)
     
     # Load dataset - load_dataset() returns single dataset, not tuple
-    train_data = load_dataset(dataset_name, train=True)
-    test_data = load_dataset(dataset_name, train=False)
+    data_root = str(dataset_cfg.get('data_root', config.get('dataroot', './data/raw')))
+    train_data = load_dataset(dataset_name, root=data_root, train=True)
+    test_data = load_dataset(dataset_name, root=data_root, train=False)
     
     split_protocol = str(unlearning_params.get('split_protocol', 'random')).strip().lower()
-    has_classwise_keys = all(
-        key in unlearning_params for key in ['forget_class', 'retain_per_class', 'forget_count', 'left_out_per_class']
+
+    has_targeted_keys = (
+        unlearning_params.get('forget_class') is not None
+        and unlearning_params.get('forget_count') is not None
+        and (
+            has_count_keys = (
+            or unlearning_params.get('retain_per_class') is not None
+        )
+        and (
+            unlearning_params.get('left_out_count') is not None
+            or unlearning_params.get('left_out_per_class') is not None
+        )
     )
-    use_classwise_protocol = split_protocol == 'classwise' and has_classwise_keys
 
-    if split_protocol == 'classwise' and not has_classwise_keys:
-        logger.warning(
-            "split_protocol=classwise requested but classwise keys are missing; falling back to random split."
-        )
+    if split_protocol == 'targeted_random' and has_targeted_keys:
+        num_classes = get_num_classes(dataset_name)
+        forget_class = int(unlearning_params['forget_class'])
+            if split_protocol == 'fully_random' and has_count_keys:
+                num_classes = get_num_classes(dataset_name)
+                forget_count = int(unlearning_params['forget_count'])
+                if unlearning_params.get('retain_count') is not None:
+                    retain_count = int(unlearning_params['retain_count'])
+                else:
+                    retain_count = int(unlearning_params['retain_per_class']) * (num_classes - 1)
+                if unlearning_params.get('left_out_count') is not None:
+                    left_out_count = int(unlearning_params['left_out_count'])
+                else:
+                    left_out_count = int(unlearning_params['left_out_per_class']) * (num_classes - 1)
 
-    if use_classwise_protocol:
-        retain_data, forget_data, left_out_data, _ = create_classwise_unlearning_splits(
+                retain_data, forget_data, left_out_data, recreated = ensure_fully_random_unlearning_split(
+                    dataset=train_data,
+                    split_dir=split_dir,
+                    retain_count=retain_count,
+                    forget_count=forget_count,
+                    left_out_count=left_out_count,
+                    seed=seed,
+                    verbose=True,
+                )
+                logger.info(
+                    "Fully-random split loaded: retain=%d, forget=%d, left_out=%d%s.",
+                    len(retain_data), len(forget_data), len(left_out_data),
+                    " (recreated)" if recreated else " (from disk)",
+                )
+            elif split_protocol == 'targeted_random' and has_count_keys:
+        classes_excluding_forget = num_classes - 1
+
+        if unlearning_params.get('retain_count') is not None:
+            retain_count = int(unlearning_params['retain_count'])
+        else:
+            retain_count = int(unlearning_params['retain_per_class']) * classes_excluding_forget
+
+        if unlearning_params.get('left_out_count') is not None:
+            left_out_count = int(unlearning_params['left_out_count'])
+        else:
+            left_out_count = int(unlearning_params['left_out_per_class']) * classes_excluding_forget
+
+        retain_data, forget_data, left_out_data, recreated = ensure_targeted_random_unlearning_split(
             dataset=train_data,
-            forget_class=int(unlearning_params['forget_class']),
-            retain_per_class=int(unlearning_params['retain_per_class']),
-            forget_count=int(unlearning_params['forget_count']),
-            left_out_per_class=int(unlearning_params['left_out_per_class']),
+            split_dir=split_dir,
+            forget_class=forget_class,
+            retain_count=retain_count,
+            forget_count=forget_count,
+            left_out_count=left_out_count,
             seed=seed,
+            verbose=True,
         )
-        recreated = False
         logger.info(
-            "Using classwise protocol splits from unlearning.params "
-            f"(retain={len(retain_data)}, forget={len(forget_data)}, left_out={len(left_out_data)})."
+            "Targeted-random split loaded: retain=%d, forget=%d, left_out=%d%s.",
+            len(retain_data), len(forget_data), len(left_out_data),
+            " (recreated)" if recreated else " (from disk)",
         )
     else:
+        if split_protocol == 'targeted_random':
+            logger.warning(
+                "split_protocol=targeted_random requested but required keys are missing; "
+                "falling back to fraction-based random split."
+            )
         logger.info(
             "Using random retain/forget split with forget_fraction=%s (split_protocol=%s).",
             forget_fraction,

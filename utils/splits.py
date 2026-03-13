@@ -511,3 +511,188 @@ def ensure_targeted_random_unlearning_split(
         save_dir=split_dir,
     )
     return retain_set, forget_set, left_out_set, True
+
+
+# ── Fully-random split (no class constraint on forget set) ──────────────────
+
+def _fully_random_split_file_paths(split_dir: str):
+    forget_path = os.path.join(split_dir, "fully_random_forget_idx.npy")
+    retain_path = os.path.join(split_dir, "fully_random_retain_idx.npy")
+    left_out_path = os.path.join(split_dir, "fully_random_left_out_idx.npy")
+    meta_path = os.path.join(split_dir, "fully_random_split_meta.json")
+    return forget_path, retain_path, left_out_path, meta_path
+
+
+def _validate_fully_random_split(
+    retain_idx,
+    forget_idx,
+    left_out_idx,
+    retain_count: int,
+    forget_count: int,
+    left_out_count: int,
+) -> List[str]:
+    issues: List[str] = []
+    retain_idx = np.asarray(retain_idx, dtype=int)
+    forget_idx = np.asarray(forget_idx, dtype=int)
+    left_out_idx = np.asarray(left_out_idx, dtype=int)
+
+    if len(retain_idx) != int(retain_count):
+        issues.append(f"retain size mismatch: expected={retain_count}, got={len(retain_idx)}")
+    if len(forget_idx) != int(forget_count):
+        issues.append(f"forget size mismatch: expected={forget_count}, got={len(forget_idx)}")
+    if len(left_out_idx) != int(left_out_count):
+        issues.append(f"left_out size mismatch: expected={left_out_count}, got={len(left_out_idx)}")
+
+    if len(np.unique(retain_idx)) != len(retain_idx):
+        issues.append("Duplicate indices in retain split.")
+    if len(np.unique(forget_idx)) != len(forget_idx):
+        issues.append("Duplicate indices in forget split.")
+    if len(np.unique(left_out_idx)) != len(left_out_idx):
+        issues.append("Duplicate indices in left_out split.")
+
+    retain_set = set(int(v) for v in retain_idx.tolist())
+    forget_set_s = set(int(v) for v in forget_idx.tolist())
+    left_out_set_s = set(int(v) for v in left_out_idx.tolist())
+
+    if retain_set.intersection(forget_set_s):
+        issues.append("retain/forget overlap detected.")
+    if retain_set.intersection(left_out_set_s):
+        issues.append("retain/left_out overlap detected.")
+    if forget_set_s.intersection(left_out_set_s):
+        issues.append("forget/left_out overlap detected.")
+
+    return issues
+
+
+def create_fully_random_unlearning_split(
+    dataset,
+    retain_count: int,
+    forget_count: int,
+    left_out_count: int,
+    seed: int = 0,
+    save_dir: Optional[str] = None,
+):
+    """
+    Create retain/forget/left-out splits by randomly shuffling the entire dataset.
+
+    No class constraints — forget samples can come from any class.
+    Protocol: shuffle all indices, first forget_count -> forget,
+    next retain_count -> retain, next left_out_count -> left_out.
+    """
+    n = len(dataset)
+    total_needed = int(retain_count) + int(forget_count) + int(left_out_count)
+    if n < total_needed:
+        raise ValueError(
+            f"Dataset too small for requested split sizes: dataset={n}, "
+            f"retain={retain_count}+forget={forget_count}+left_out={left_out_count}={total_needed}"
+        )
+
+    rng = np.random.default_rng(int(seed))
+    perm = rng.permutation(n)
+    forget_idx = perm[: int(forget_count)]
+    retain_idx = perm[int(forget_count): int(forget_count) + int(retain_count)]
+    left_out_idx = perm[
+        int(forget_count) + int(retain_count):
+        int(forget_count) + int(retain_count) + int(left_out_count)
+    ]
+
+    issues = _validate_fully_random_split(
+        retain_idx, forget_idx, left_out_idx, retain_count, forget_count, left_out_count
+    )
+    if issues:
+        raise ValueError("Invalid fully-random split generated:\n - " + "\n - ".join(issues))
+
+    if save_dir is not None:
+        os.makedirs(save_dir, exist_ok=True)
+        forget_path, retain_path, left_out_path, meta_path = _fully_random_split_file_paths(save_dir)
+        np.save(forget_path, forget_idx)
+        np.save(retain_path, retain_idx)
+        np.save(left_out_path, left_out_idx)
+        meta_payload: Dict[str, int] = {
+            "version": 1,
+            "dataset_size": int(n),
+            "seed": int(seed),
+            "retain_count": int(retain_count),
+            "forget_count": int(forget_count),
+            "left_out_count": int(left_out_count),
+        }
+        with open(meta_path, "w", encoding="utf-8") as f:
+            json.dump(meta_payload, f, indent=2)
+
+    return (
+        Subset(dataset, retain_idx.tolist()),
+        Subset(dataset, forget_idx.tolist()),
+        Subset(dataset, left_out_idx.tolist()),
+    )
+
+
+def ensure_fully_random_unlearning_split(
+    dataset,
+    split_dir: str,
+    retain_count: int,
+    forget_count: int,
+    left_out_count: int,
+    seed: int,
+    verbose: bool = True,
+):
+    """
+    Load fully-random splits from disk if valid, otherwise recreate and save them.
+
+    Returns:
+        retain_set, forget_set, left_out_set, recreated
+    """
+    forget_path, retain_path, left_out_path, meta_path = _fully_random_split_file_paths(split_dir)
+    has_files = all(os.path.exists(p) for p in [forget_path, retain_path, left_out_path])
+
+    if has_files:
+        try:
+            forget_idx = np.load(forget_path)
+            retain_idx = np.load(retain_path)
+            left_out_idx = np.load(left_out_path)
+
+            issues = _validate_fully_random_split(
+                retain_idx, forget_idx, left_out_idx, retain_count, forget_count, left_out_count
+            )
+
+            if os.path.exists(meta_path):
+                with open(meta_path, "r", encoding="utf-8") as f:
+                    meta = json.load(f)
+                if int(meta.get("dataset_size", -1)) != len(dataset):
+                    issues.append("fully-random split metadata dataset_size mismatch.")
+                if int(meta.get("seed", -1)) != int(seed):
+                    issues.append("fully-random split metadata seed mismatch.")
+                if int(meta.get("retain_count", -1)) != int(retain_count):
+                    issues.append("fully-random split metadata retain_count mismatch.")
+                if int(meta.get("forget_count", -1)) != int(forget_count):
+                    issues.append("fully-random split metadata forget_count mismatch.")
+                if int(meta.get("left_out_count", -1)) != int(left_out_count):
+                    issues.append("fully-random split metadata left_out_count mismatch.")
+            else:
+                issues.append("fully_random_split_meta.json is missing.")
+
+            if issues:
+                raise ValueError("\n - ".join(issues))
+
+            if verbose:
+                print("Loading fully-random retain/forget/left-out splits from disk (validated)...")
+            return (
+                Subset(dataset, retain_idx.tolist()),
+                Subset(dataset, forget_idx.tolist()),
+                Subset(dataset, left_out_idx.tolist()),
+                False,
+            )
+        except Exception as ex:
+            if verbose:
+                print(f"Existing fully-random split failed validation, recreating: {ex}")
+
+    if verbose:
+        print("Creating fully-random retain/forget/left-out splits...")
+    retain_set, forget_set, left_out_set = create_fully_random_unlearning_split(
+        dataset=dataset,
+        retain_count=int(retain_count),
+        forget_count=int(forget_count),
+        left_out_count=int(left_out_count),
+        seed=int(seed),
+        save_dir=split_dir,
+    )
+    return retain_set, forget_set, left_out_set, True

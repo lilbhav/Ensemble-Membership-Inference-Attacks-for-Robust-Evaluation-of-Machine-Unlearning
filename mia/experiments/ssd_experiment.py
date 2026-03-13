@@ -20,7 +20,7 @@ if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
 from data.loaders import load_dataset, get_num_classes
-from utils.splits import ensure_retain_forget_split, ensure_targeted_random_unlearning_split
+from utils.splits import ensure_retain_forget_split, ensure_targeted_random_unlearning_split, ensure_fully_random_unlearning_split
 from utils.metrics import compute_accuracy, log_accuracies
 from utils.transfer_setup import ensure_cifar10_from_cifar100_transfer_checkpoint
 
@@ -69,6 +69,7 @@ class SSDInput:
     transfer_finetune_batch_size: int = 128
     transfer_finetune_learning_rate: float = 0.001
     rebuild_transfer_checkpoint: bool = False
+    split_protocol: str = "fully_random"
 
 
 class IndexedDataset(Dataset):
@@ -293,13 +294,38 @@ def _create_loaders(args: SSDInput):
     test_dataset = load_dataset(dataset_name=args.dataset, root=args.dataroot, train=False)
 
     split_dir = args.split_dir
-    has_targeted_counts = args.forget_count is not None and (
+    split_protocol = str(args.split_protocol).strip().lower()
+    has_count_keys = args.forget_count is not None and (
         args.retain_count is not None or args.retain_per_class is not None
     ) and (
         args.left_out_count is not None or args.left_out_per_class is not None
     )
 
-    if has_targeted_counts:
+    if split_protocol == "fully_random" and has_count_keys:
+        retain_count = int(
+            args.retain_count
+            if args.retain_count is not None
+            else int(args.retain_per_class) * (int(get_num_classes(args.dataset)) - 1)
+        )
+        left_out_count = int(
+            args.left_out_count
+            if args.left_out_count is not None
+            else int(args.left_out_per_class) * (int(get_num_classes(args.dataset)) - 1)
+        )
+        retain_set, forget_set, left_out_set, _ = ensure_fully_random_unlearning_split(
+            dataset=dataset,
+            split_dir=split_dir,
+            retain_count=retain_count,
+            forget_count=int(args.forget_count),
+            left_out_count=left_out_count,
+            seed=int(args.seed),
+            verbose=True,
+        )
+        print(
+            "Using fully-random protocol (forget from any class): "
+            f"retain={len(retain_set)}, forget={len(forget_set)}, left_out={len(left_out_set)}"
+        )
+    elif has_count_keys:
         classes_excluding_forget = int(get_num_classes(args.dataset)) - 1
         retain_count = int(
             args.retain_count

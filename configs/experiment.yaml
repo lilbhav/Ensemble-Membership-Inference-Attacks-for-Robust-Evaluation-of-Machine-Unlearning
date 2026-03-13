@@ -5,8 +5,8 @@ experiment:
 
 dataset:
   name: "cifar10"
-  data_root: "./data"
-  split_dir: "./data/splits"
+  data_root: "/content/data/raw"
+  split_dir: "/content/gdrive/My Drive/mia_splits/scrub_fully_random"
   forget_fraction: 0.2
   retain_fraction: 0.8
   num_classes: 10
@@ -20,13 +20,11 @@ unlearning:
   method: "scrub"   # [fine_tune, grad_ascent, scrub, ssd]
   checkpoint_path: "/content/gdrive/My Drive/mia_checkpoints/scrub_unlearned_model.pt"
   params:
-    split_protocol: "random"
-    # SCRUB preset aligned with third-party flow
-    # Data protocol
-    forget_class: 0
-    retain_per_class: 100
+    split_protocol: "fully_random"
+    # Data protocol — must match the split used during SCRUB/SSD unlearning.
+    retain_count: 900
     forget_count: 25
-    left_out_per_class: 25
+    left_out_count: 225
 
     # Transfer setup (CIFAR-100 -> CIFAR-10)
     source_checkpoint_cifar100: "/content/gdrive/My Drive/mia_checkpoints/pretrained_cifar100.pt"
@@ -139,5 +137,5 @@ mia:
         num_augmentations: 2
 
 output:
-  save_dir: "./results/mia_disparity"
-  log_dir: "./logs"
+  save_dir: "/content/gdrive/My Drive/mia_results/scrub"
+  log_dir: "/content/gdrive/My Drive/mia_results/logs"

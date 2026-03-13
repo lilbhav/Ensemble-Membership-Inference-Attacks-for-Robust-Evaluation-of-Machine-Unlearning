@@ -1,7 +1,7 @@
 dataset: cifar10
 dataroot: /content/data/raw
 seed: 42
-split_dir: /content/gdrive/My Drive/mia_splits/scrub_targeted_random
+split_dir: /content/gdrive/My Drive/mia_splits/scrub_fully_random
 
 # Transfer setup: pretrain on CIFAR-100, replace final layer, fine-tune on CIFAR-10.
 source_checkpoint_cifar100: /content/gdrive/My Drive/mia_checkpoints/pretrained_cifar100.pt
@@ -11,8 +11,8 @@ transfer_finetune_batch_size: 128
 transfer_finetune_learning_rate: 0.001
 rebuild_transfer_checkpoint: false
 
-# Targeted random split setup (random samples, not per-class quotas).
-forget_class: 0
+# Fully-random split setup: forget samples drawn from any class.
+split_protocol: "fully_random"
 retain_count: 900
 forget_count: 25
 left_out_count: 225

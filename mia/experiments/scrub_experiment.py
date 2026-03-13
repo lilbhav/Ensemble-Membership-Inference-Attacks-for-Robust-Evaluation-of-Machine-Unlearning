@@ -15,7 +15,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 
 # Framework imports
 from data.loaders import load_dataset, get_num_classes
-from utils.splits import ensure_retain_forget_split, ensure_targeted_random_unlearning_split
+from utils.splits import ensure_retain_forget_split, ensure_targeted_random_unlearning_split, ensure_fully_random_unlearning_split
 from utils.metrics import compute_accuracy, log_accuracies
 from utils.transfer_setup import ensure_cifar10_from_cifar100_transfer_checkpoint
 from torch.utils.data import DataLoader
@@ -483,9 +483,10 @@ def main():
 
     # ========== 2. CREATE SPLITS ==========
     split_dir = args.split_dir
-    has_targeted_counts = (
-        getattr(args, "forget_class", None) is not None
-        and getattr(args, "forget_count", None) is not None
+    split_protocol = str(getattr(args, "split_protocol", "targeted_random")).strip().lower()
+
+    has_count_keys = (
+        getattr(args, "forget_count", None) is not None
         and (
             getattr(args, "retain_count", None) is not None
             or getattr(args, "retain_per_class", None) is not None
@@ -496,19 +497,41 @@ def main():
         )
     )
 
-    if has_targeted_counts:
+    if split_protocol == "fully_random" and has_count_keys:
+        if getattr(args, "retain_count", None) is not None:
+            retain_count = int(args.retain_count)
+        else:
+            retain_count = int(args.retain_per_class) * (int(get_num_classes(args.dataset)) - 1)
+        if getattr(args, "left_out_count", None) is not None:
+            left_out_count = int(args.left_out_count)
+        else:
+            left_out_count = int(args.left_out_per_class) * (int(get_num_classes(args.dataset)) - 1)
+        forget_count = int(args.forget_count)
+
+        retain_set, forget_set, left_out_set, _ = ensure_fully_random_unlearning_split(
+            dataset=dataset,
+            split_dir=split_dir,
+            retain_count=retain_count,
+            forget_count=forget_count,
+            left_out_count=left_out_count,
+            seed=int(args.seed),
+            verbose=True,
+        )
+        print(
+            "  Using fully-random protocol (forget from any class): "
+            f"retain={len(retain_set)}, forget={len(forget_set)}, left_out={len(left_out_set)}"
+        )
+    elif getattr(args, "forget_class", None) is not None and has_count_keys:
         forget_class = int(args.forget_class)
         classes_excluding_forget = int(get_num_classes(args.dataset)) - 1
         if getattr(args, "retain_count", None) is not None:
             retain_count = int(args.retain_count)
         else:
             retain_count = int(args.retain_per_class) * classes_excluding_forget
-
         if getattr(args, "left_out_count", None) is not None:
             left_out_count = int(args.left_out_count)
         else:
             left_out_count = int(args.left_out_per_class) * classes_excluding_forget
-
         forget_count = int(args.forget_count)
 
         retain_set, forget_set, left_out_set, _ = ensure_targeted_random_unlearning_split(
