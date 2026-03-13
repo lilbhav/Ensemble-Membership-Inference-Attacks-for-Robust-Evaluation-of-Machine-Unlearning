@@ -39,8 +39,8 @@ exponent: 1.0
 forget_threshold: 1.0
 min_layer: -1
 max_layer: -1
-dampening_constant: 1
-selection_weighting: 100
+dampening_constant: 0.6
+selection_weighting: 70
 
 eval_every: 1
 print_accuracies: true
