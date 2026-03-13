@@ -39,19 +39,37 @@ def load_config(config_path: str) -> Dict[str, Any]:
 def setup_logging(log_dir: str, experiment_name: str) -> logging.Logger:
     """Setup logging for the experiment."""
     os.makedirs(log_dir, exist_ok=True)
-    
+
+    class SafeStreamHandler(logging.StreamHandler):
+        """StreamHandler that silently disables itself if notebook stdout disconnects."""
+
+        def emit(self, record):
+            try:
+                super().emit(record)
+            except OSError:
+                # In Colab/Jupyter, stdout can disconnect transiently (Errno 107).
+                try:
+                    self.acquire()
+                    self.stream = None
+                finally:
+                    self.release()
+
     logger = logging.getLogger(__name__)
     logger.setLevel(logging.INFO)
-    
+
+    # Avoid duplicated logs when setup_logging is called multiple times in one session.
+    logger.handlers.clear()
+    logger.propagate = False
+
     # File handler
     log_file = os.path.join(log_dir, f"{experiment_name}.log")
     fh = logging.FileHandler(log_file)
     fh.setLevel(logging.INFO)
-    
+
     # Console handler
-    ch = logging.StreamHandler()
+    ch = SafeStreamHandler()
     ch.setLevel(logging.INFO)
-    
+
     # Formatter
     formatter = logging.Formatter(
         "%(message)s"
