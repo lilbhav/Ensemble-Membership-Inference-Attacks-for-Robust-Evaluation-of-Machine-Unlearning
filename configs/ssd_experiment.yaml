@@ -25,14 +25,20 @@ check_path: /content/gdrive/My Drive/mia_checkpoints/ssd_unlearned_model.pt
 results_path: /content/gdrive/My Drive/mia_checkpoints/ssd_results.txt
 learning_rate: 0.1
 
-# SSD parameters from requested setup
+# SSD parameters.
+# selection_weighting (alpha): parameter selected only if forget_importance > alpha * retain_importance.
+#   Higher = fewer parameters touched = safer for retain accuracy.
+#   SSD paper used alpha=10 for full-class forgetting (~5000 samples). With only 25 forget
+#   samples the Fisher estimate is noisy, so a higher threshold is needed.
+# dampening_constant (lambda): dampening scale = (lambda * retain_imp / forget_imp)^exponent.
+#   Lower = less aggressive dampening.
 lower_bound: 1.0
 exponent: 1.0
 forget_threshold: 1.0
 min_layer: -1
 max_layer: -1
 dampening_constant: 1
-selection_weighting: 5
+selection_weighting: 10
 
 eval_every: 1
 print_accuracies: true
