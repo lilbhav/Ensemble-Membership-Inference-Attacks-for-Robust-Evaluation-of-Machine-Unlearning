@@ -290,6 +290,8 @@ def prepare_data(config: Dict[str, Any]) -> tuple:
         )
     )
 
+    aux_data = None
+
     if split_protocol == 'fully_random' and has_count_keys:
         num_classes = get_num_classes(dataset_name)
         forget_count = int(unlearning_params['forget_count'])
@@ -317,6 +319,7 @@ def prepare_data(config: Dict[str, Any]) -> tuple:
             len(retain_data), len(forget_data), len(left_out_data),
             " (recreated)" if recreated else " (from disk)",
         )
+        aux_data = left_out_data
         logger.info("  Forget set: %d (from any class)", len(forget_data))
         logger.info("  Retain set (members): %d", len(retain_data))
 
@@ -351,6 +354,7 @@ def prepare_data(config: Dict[str, Any]) -> tuple:
             len(retain_data), len(forget_data), len(left_out_data),
             " (recreated)" if recreated else " (from disk)",
         )
+        aux_data = left_out_data
         logger.info("  Forget set: %d (target class=%d)", len(forget_data), forget_class)
         logger.info("  Retain set (members): %d", len(retain_data))
 
@@ -391,9 +395,10 @@ def prepare_data(config: Dict[str, Any]) -> tuple:
     # For MIA: members are RETAIN set (what SCRUB kept), non-members are TEST set
     member_loader = DataLoader(retain_data, batch_size=batch_size, shuffle=False)
     nonmember_loader = DataLoader(test_data, batch_size=batch_size, shuffle=False)
+    aux_loader = DataLoader(aux_data, batch_size=batch_size, shuffle=False) if aux_data is not None else None
     
-    # Return: member_loader, nonmember_loader, member_data (retain set), test_data (non-members)
-    return member_loader, nonmember_loader, retain_data, test_data
+    # Return: member_loader, nonmember_loader, aux_loader, member_data (retain set), test_data (non-members)
+    return member_loader, nonmember_loader, aux_loader, retain_data, test_data
 
 
 def create_attack_configs(config: Dict[str, Any], 
@@ -477,7 +482,7 @@ def run_mia_experiment(config_path: str,
     logger.info(f"Split directory: {_get_split_dir(config)}")
     
     # Prepare data
-    member_loader, nonmember_loader, member_data, test_data = prepare_data(config)
+    member_loader, nonmember_loader, aux_loader, member_data, test_data = prepare_data(config)
     
     # Load unlearned model if not provided
     if unlearned_model is None:
@@ -522,6 +527,7 @@ def run_mia_experiment(config_path: str,
                 target_model=unlearned_model,
                 train_dataloader=member_loader,
                 test_dataloader=nonmember_loader,
+                aux_dataloader=aux_loader,
                 device=device,
             )
             runner.attack_results[attack_config.name] = result

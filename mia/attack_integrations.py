@@ -391,6 +391,7 @@ class ReferenceAttackWrapper:
         shadow_models: Optional[list] = None,
         train_dataloader: Optional[DataLoader] = None,
         test_dataloader: Optional[DataLoader] = None,
+        aux_dataloader: Optional[DataLoader] = None,
         device: str = "cuda",
         num_shadow_models: int = 32,
         num_epochs: int = 10,
@@ -452,6 +453,17 @@ class ReferenceAttackWrapper:
             train_dataset = TensorDataset(train_data, train_labels)
             test_dataset = TensorDataset(test_data, test_labels)
 
+            aux_dataset = None
+            if aux_dataloader is not None:
+                aux_data_list, aux_labels_list = [], []
+                for data, labels in aux_dataloader:
+                    aux_data_list.append(data)
+                    aux_labels_list.append(labels)
+                if aux_data_list:
+                    aux_data = torch.cat(aux_data_list, dim=0)
+                    aux_labels = torch.cat(aux_labels_list, dim=0)
+                    aux_dataset = TensorDataset(aux_data, aux_labels)
+
             # Determine num_classes
             num_classes = 10
             try:
@@ -497,7 +509,18 @@ class ReferenceAttackWrapper:
             # Run attack
             self.logger.info("Preparing LIRA attack (training shadow models)...")
             attack = LiraAttack(target_model_access=model_access, auxiliary_info=aux_info)
-            attack.prepare(train_dataset)
+            if aux_dataset is not None:
+                attack.prepare(aux_dataset)
+                self.logger.info(
+                    "LIRA auxiliary dataset size: %d (disjoint from member set when split protocol provides left_out).",
+                    len(aux_dataset),
+                )
+            else:
+                # Fallback keeps prior behavior when no dedicated auxiliary split is available.
+                self.logger.warning(
+                    "No auxiliary dataloader provided for LIRA; falling back to member dataset as auxiliary set."
+                )
+                attack.prepare(train_dataset)
 
             # Get membership scores in one pass to keep score calibration consistent
             self.logger.info("Inferring membership...")
@@ -1006,6 +1029,7 @@ class AttackFactory:
         target_model: nn.Module,
         train_dataloader: Optional[DataLoader] = None,
         test_dataloader: Optional[DataLoader] = None,
+        aux_dataloader: Optional[DataLoader] = None,
         device: str = "cuda",
     ) -> AttackResult:
         """
@@ -1063,6 +1087,7 @@ class AttackFactory:
                 target_model=target_model,
                 train_dataloader=train_dataloader,
                 test_dataloader=test_dataloader,
+                aux_dataloader=aux_dataloader,
                 device=device,
                 **attack_params
             )
