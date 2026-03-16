@@ -144,6 +144,40 @@ def _get_unlearning_params(config: Dict[str, Any]) -> Dict[str, Any]:
     return params
 
 
+def _get_mia_evaluation_target(config: Dict[str, Any]) -> str:
+    """Get evaluation target for MIA experiments.
+
+    Supported targets:
+      - forget_vs_test: detect unlearning failures (primary)
+      - retain_vs_test: classic membership evaluation
+      - forget_vs_retain: distinguish forgotten from retained train points
+    """
+    mia_cfg = config.get('mia', {}) if isinstance(config.get('mia', {}), dict) else {}
+    target = str(mia_cfg.get('evaluation_target', 'forget_vs_test')).strip().lower()
+    supported = {'forget_vs_test', 'retain_vs_test', 'forget_vs_retain'}
+    if target not in supported:
+        raise ValueError(
+            f"Unsupported mia.evaluation_target='{target}'. Supported: {sorted(supported)}"
+        )
+    return target
+
+
+def _resolve_evaluation_sets(
+    evaluation_target: str,
+    retain_data,
+    forget_data,
+    test_data,
+):
+    """Resolve member/non-member datasets for selected evaluation objective."""
+    if evaluation_target == 'forget_vs_test':
+        return forget_data, test_data, 'forget', 'test'
+    if evaluation_target == 'retain_vs_test':
+        return retain_data, test_data, 'retain', 'test'
+    if evaluation_target == 'forget_vs_retain':
+        return forget_data, retain_data, 'forget', 'retain'
+    raise ValueError(f"Unhandled evaluation target: {evaluation_target}")
+
+
 def _minmax_normalize(scores: np.ndarray) -> np.ndarray:
     """Min-max normalize a 1D score array to [0, 1]."""
     min_score = float(np.min(scores))
@@ -258,7 +292,7 @@ def load_unlearned_model(config: Dict[str, Any], device: str) -> Optional[torch.
 
 
 def prepare_data(config: Dict[str, Any]) -> tuple:
-    """Prepare train/test dataloaders."""
+    """Prepare split datasets and optional auxiliary data."""
     logger = logging.getLogger(__name__)
     
     logger.info("Loading dataset...")
@@ -392,13 +426,8 @@ def prepare_data(config: Dict[str, Any]) -> tuple:
     logger.info(f"  Training samples: {len(train_data)}")
     logger.info(f"  Test samples: {len(test_data)}")
     
-    # For MIA: members are RETAIN set (what SCRUB kept), non-members are TEST set
-    member_loader = DataLoader(retain_data, batch_size=batch_size, shuffle=False)
-    nonmember_loader = DataLoader(test_data, batch_size=batch_size, shuffle=False)
-    aux_loader = DataLoader(aux_data, batch_size=batch_size, shuffle=False) if aux_data is not None else None
-    
-    # Return: member_loader, nonmember_loader, aux_loader, member_data (retain set), test_data (non-members)
-    return member_loader, nonmember_loader, aux_loader, retain_data, test_data
+    # Return raw datasets. Evaluation target selection happens in run_mia_experiment.
+    return retain_data, forget_data, test_data, aux_data, batch_size
 
 
 def create_attack_configs(config: Dict[str, Any], 
@@ -481,8 +510,24 @@ def run_mia_experiment(config_path: str,
     logger.info(f"Seed: {seed}")
     logger.info(f"Split directory: {_get_split_dir(config)}")
     
-    # Prepare data
-    member_loader, nonmember_loader, aux_loader, member_data, test_data = prepare_data(config)
+    # Prepare split datasets
+    retain_data, forget_data, test_data, aux_data, batch_size = prepare_data(config)
+
+    # Resolve evaluation objective (defaults to unlearning-failure detection)
+    evaluation_target = _get_mia_evaluation_target(config)
+    member_data, nonmember_data, member_name, nonmember_name = _resolve_evaluation_sets(
+        evaluation_target,
+        retain_data,
+        forget_data,
+        test_data,
+    )
+    member_loader = DataLoader(member_data, batch_size=batch_size, shuffle=False)
+    nonmember_loader = DataLoader(nonmember_data, batch_size=batch_size, shuffle=False)
+    aux_loader = DataLoader(aux_data, batch_size=batch_size, shuffle=False) if aux_data is not None else None
+
+    logger.info("MIA evaluation_target: %s", evaluation_target)
+    logger.info("  member set (%s): %d", member_name, len(member_data))
+    logger.info("  non-member set (%s): %d", nonmember_name, len(nonmember_data))
     
     # Load unlearned model if not provided
     if unlearned_model is None:
@@ -544,8 +589,8 @@ def run_mia_experiment(config_path: str,
     logger.info("EVALUATION")
     logger.info("="*80)
     
-    num_members = len(member_data)      # RETAIN set size (what SCRUB trained on)
-    num_nonmembers = len(test_data)     # TEST set size (unseen by SCRUB)
+    num_members = len(member_data)
+    num_nonmembers = len(nonmember_data)
     
     # Ground truth: 1 for members, 0 for non-members
     # Order must match AttackResult.all_predictions: [member_preds | nonmember_preds]
@@ -554,7 +599,13 @@ def run_mia_experiment(config_path: str,
         np.zeros(num_nonmembers)
     ])
     
-    logger.info(f"Ground truth: {num_members} members, {num_nonmembers} non-members")
+    logger.info(
+        "Ground truth (%s): %d members vs (%s): %d non-members",
+        member_name,
+        num_members,
+        nonmember_name,
+        num_nonmembers,
+    )
     logger.info(f"Total samples in ground truth: {len(ground_truth)}")
     
     metrics = runner.evaluate_attacks(ground_truth)
@@ -634,6 +685,9 @@ def run_mia_experiment(config_path: str,
         'runner': runner,
         'metrics': metrics,
         'ground_truth': ground_truth,
+        'evaluation_target': evaluation_target,
+        'member_set_name': member_name,
+        'nonmember_set_name': nonmember_name,
     }
 
 

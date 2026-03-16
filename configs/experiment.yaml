@@ -106,6 +106,7 @@ unlearning:
   #   eval_batch_size: 32
 
 mia:
+  evaluation_target: "forget_vs_test"  # primary objective: detect unlearning failures
   attacks:
     - name: "yeom"
       params:

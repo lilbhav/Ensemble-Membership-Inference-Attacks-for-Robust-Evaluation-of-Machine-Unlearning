@@ -33,6 +33,9 @@ AugAttack = AugAuxiliaryInfo = AugModelAccess = None
 ShokriAttack = ShokriAuxiliaryInfo = ShokriModelAccess = None
 LiraAttack = LiraAuxiliaryInfo = LiraModelAccess = None
 CalibrationAttack = CalibrationAuxiliaryInfo = CalibrationModelAccess = None
+YeomAttack = YeomAuxiliaryInfo = YeomModelAccess = None
+ReferenceAttack = ReferenceAuxiliaryInfo = ReferenceModelAccess = None
+LosstrajAttack = LosstrajAuxiliaryInfo = LosstrajModelAccess = None
 ModelAccessType = AttackTrainingSet = None
 
 try:
@@ -74,6 +77,33 @@ try:
 except ImportError:
     HAS_REFERENCE_CALIBRATION = False
 
+try:
+    yeom_mia = importlib.import_module("miae.attacks.yeom_mia")
+    YeomAttack = yeom_mia.YeomAttack
+    YeomAuxiliaryInfo = yeom_mia.YeomAuxiliaryInfo
+    YeomModelAccess = yeom_mia.YeomModelAccess
+    HAS_REFERENCE_YEOM = True
+except ImportError:
+    HAS_REFERENCE_YEOM = False
+
+try:
+    reference_mia = importlib.import_module("miae.attacks.reference_mia")
+    ReferenceAttack = reference_mia.ReferenceAttack
+    ReferenceAuxiliaryInfo = reference_mia.ReferenceAuxiliaryInfo
+    ReferenceModelAccess = reference_mia.ReferenceModelAccess
+    HAS_REFERENCE_REFERENCE = True
+except ImportError:
+    HAS_REFERENCE_REFERENCE = False
+
+try:
+    losstraj_mia = importlib.import_module("miae.attacks.losstraj_mia")
+    LosstrajAttack = losstraj_mia.LosstrajAttack
+    LosstrajAuxiliaryInfo = losstraj_mia.LosstrajAuxiliaryInfo
+    LosstrajModelAccess = losstraj_mia.LosstrajModelAccess
+    HAS_REFERENCE_LOSSTRAJ = True
+except ImportError:
+    HAS_REFERENCE_LOSSTRAJ = False
+
 # Register safe globals for PyTorch 2.6+ compatibility
 # This allows unpickling custom classes used by reference attacks
 if HAS_REFERENCE_AUGMENTATION:
@@ -108,6 +138,127 @@ class ReferenceAttackWrapper:
         """
         self.logger = logging.getLogger(__name__)
         self.logging_enabled = logging_enabled
+
+    @staticmethod
+    def _dataset_size(dataloader: Optional[DataLoader], default: int = 100) -> int:
+        if dataloader is None:
+            return default
+        return len(dataloader.dataset)
+
+    def _placeholder_result(
+        self,
+        train_dataloader: Optional[DataLoader],
+        test_dataloader: Optional[DataLoader],
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Return deterministic-shape placeholder outputs when reference attacks fail."""
+        num_train = self._dataset_size(train_dataloader)
+        num_test = self._dataset_size(test_dataloader)
+        member_scores = np.random.uniform(0.5, 1.0, num_train)
+        nonmember_scores = np.random.uniform(0.0, 0.5, num_test)
+        all_predictions = np.concatenate([
+            (member_scores > 0.5).astype(int),
+            (nonmember_scores > 0.5).astype(int),
+        ])
+        return member_scores, nonmember_scores, all_predictions
+
+    def _extract_dataset(
+        self,
+        dataloader: Optional[DataLoader],
+        name: str,
+        required: bool,
+    ) -> Tuple[Optional[TensorDataset], Optional[torch.Tensor], Optional[torch.Tensor]]:
+        """Materialize an entire dataloader into TensorDataset/data/labels tensors."""
+        if dataloader is None:
+            if required:
+                raise ValueError(f"{name} dataloader is required")
+            return None, None, None
+
+        data_list, labels_list = [], []
+        for data, labels in dataloader:
+            data_list.append(data)
+            labels_list.append(labels)
+
+        if not data_list:
+            if required:
+                raise ValueError(f"{name} dataloader is empty")
+            return None, None, None
+
+        data = torch.cat(data_list, dim=0)
+        labels = torch.cat(labels_list, dim=0)
+        return TensorDataset(data, labels), data, labels
+
+    def _build_attack_datasets(
+        self,
+        train_dataloader: Optional[DataLoader],
+        test_dataloader: Optional[DataLoader],
+        aux_dataloader: Optional[DataLoader],
+    ) -> Tuple[TensorDataset, TensorDataset, Optional[TensorDataset], torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Build train/test/aux datasets once for all reference attacks."""
+        train_dataset, train_data, train_labels = self._extract_dataset(
+            train_dataloader, "train", required=True
+        )
+        test_dataset, test_data, test_labels = self._extract_dataset(
+            test_dataloader, "test", required=True
+        )
+        aux_dataset, _, _ = self._extract_dataset(aux_dataloader, "aux", required=False)
+
+        return (
+            train_dataset,
+            test_dataset,
+            aux_dataset,
+            train_data,
+            train_labels,
+            test_data,
+            test_labels,
+        )
+
+    @staticmethod
+    def _infer_num_classes(target_model: nn.Module, train_labels: torch.Tensor) -> int:
+        num_classes = 10
+        try:
+            if hasattr(target_model, 'fc'):
+                num_classes = target_model.fc.out_features
+            elif hasattr(target_model, 'classifier'):
+                num_classes = target_model.classifier.out_features
+            else:
+                num_classes = len(torch.unique(train_labels))
+        except Exception:
+            pass
+        return int(num_classes)
+
+    def _call_with_safe_globals(
+        self,
+        fn,
+        *args,
+        trusted_weights_fallback: bool = False,
+    ):
+        """Execute attack calls under PyTorch safe_globals when available."""
+        if AttackTrainingSet is None:
+            return fn(*args)
+
+        try:
+            with torch.serialization.safe_globals([AttackTrainingSet]):
+                return fn(*args)
+        except TypeError:
+            return fn(*args)
+        except Exception as exc:
+            if not trusted_weights_fallback or "Weights only load failed" not in str(exc):
+                raise
+
+            self.logger.warning(
+                "Attack prepare hit PyTorch safe-load guard; retrying with trusted weights_only=False fallback."
+            )
+            original_torch_load = torch.load
+
+            def _trusted_load(*call_args, **call_kwargs):
+                call_kwargs.setdefault("weights_only", False)
+                return original_torch_load(*call_args, **call_kwargs)
+
+            torch.load = _trusted_load
+            try:
+                return fn(*args)
+            finally:
+                torch.load = original_torch_load
 
     @staticmethod
     def _predictions_by_member_prior(
@@ -168,57 +319,22 @@ class ReferenceAttackWrapper:
 
         if not HAS_REFERENCE_SHOKRI:
             self.logger.warning("Reference Shokri not available. Using placeholder.")
-            num_train = len(train_dataloader.dataset) if train_dataloader else 100
-            num_test = len(test_dataloader.dataset) if test_dataloader else 100
-            member_scores = np.random.uniform(0.5, 1.0, num_train)
-            nonmember_scores = np.random.uniform(0.0, 0.5, num_test)
-            return member_scores, nonmember_scores, np.concatenate([np.ones(num_train), np.zeros(num_test)])
+            return self._placeholder_result(train_dataloader, test_dataloader)
 
         try:
             torch_device = torch.device(device)
             self.logger.info("Using reference implementation from Third_Party_Code/mia-disparity")
 
-            # Extract data from dataloaders
-            train_data_list, train_labels_list = [], []
-            for data, labels in train_dataloader:
-                train_data_list.append(data)
-                train_labels_list.append(labels)
-            train_data = torch.cat(train_data_list, dim=0)
-            train_labels = torch.cat(train_labels_list, dim=0)
-
-            test_data_list, test_labels_list = [], []
-            for data, labels in test_dataloader:
-                test_data_list.append(data)
-                test_labels_list.append(labels)
-            test_data = torch.cat(test_data_list, dim=0)
-            test_labels = torch.cat(test_labels_list, dim=0)
-
-            # Create datasets
-            train_dataset = TensorDataset(train_data, train_labels)
-            test_dataset = TensorDataset(test_data, test_labels)
-
-            aux_dataset = None
-            if aux_dataloader is not None:
-                aux_data_list, aux_labels_list = [], []
-                for data, labels in aux_dataloader:
-                    aux_data_list.append(data)
-                    aux_labels_list.append(labels)
-                if aux_data_list:
-                    aux_data = torch.cat(aux_data_list, dim=0)
-                    aux_labels = torch.cat(aux_labels_list, dim=0)
-                    aux_dataset = TensorDataset(aux_data, aux_labels)
-
-            # Determine num_classes
-            num_classes = 10
-            try:
-                if hasattr(target_model, 'fc'):
-                    num_classes = target_model.fc.out_features
-                elif hasattr(target_model, 'classifier'):
-                    num_classes = target_model.classifier.out_features
-                else:
-                    num_classes = len(torch.unique(train_labels))
-            except:
-                pass
+            (
+                train_dataset,
+                test_dataset,
+                aux_dataset,
+                train_data,
+                train_labels,
+                test_data,
+                test_labels,
+            ) = self._build_attack_datasets(train_dataloader, test_dataloader, aux_dataloader)
+            num_classes = self._infer_num_classes(target_model, train_labels)
 
             # Create temporary directory for attack artifacts
             temp_dir = tempfile.mkdtemp()
@@ -249,47 +365,17 @@ class ReferenceAttackWrapper:
                 access_type=ModelAccessType.BLACK_BOX
             )
 
-            # Register safe globals for PyTorch 2.6+ weights_only loading
-            try:
-                torch.serialization.add_safe_globals([AttackTrainingSet])
-            except Exception:
-                pass
-
-            # Run attack with safe globals context for PyTorch 2.6
             self.logger.info("Preparing Shokri attack (training shadow models)...")
             attack = ShokriAttack(target_model_access=model_access, auxiliary_info=aux_info)
             prepare_dataset = aux_dataset if aux_dataset is not None else train_dataset
             if aux_dataset is not None:
                 self.logger.info("Shokri auxiliary dataset size: %d", len(aux_dataset))
-            
-            # Use context manager for safe unpickling of custom classes
-            try:
-                with torch.serialization.safe_globals([AttackTrainingSet]):
-                    attack.prepare(prepare_dataset)
-            except TypeError:
-                # Fallback if safe_globals doesn't support context manager
-                attack.prepare(prepare_dataset)
-            except Exception as prepare_error:
-                # PyTorch 2.6+ may still block custom pickled objects depending on backend
-                # and internal load path. Since this artifact is generated in-run by trusted
-                # code, use explicit trusted fallback via weights_only=False.
-                if "Weights only load failed" in str(prepare_error):
-                    self.logger.warning(
-                        "Shokri prepare hit PyTorch safe-load guard; retrying with trusted weights_only=False fallback."
-                    )
-                    original_torch_load = torch.load
 
-                    def _trusted_load(*args, **kwargs):
-                        kwargs.setdefault("weights_only", False)
-                        return original_torch_load(*args, **kwargs)
-
-                    torch.load = _trusted_load
-                    try:
-                        attack.prepare(prepare_dataset)
-                    finally:
-                        torch.load = original_torch_load
-                else:
-                    raise
+            self._call_with_safe_globals(
+                attack.prepare,
+                prepare_dataset,
+                trusted_weights_fallback=True,
+            )
 
             # Get membership scores with safe globals context
             self.logger.info("Inferring membership...")
@@ -317,12 +403,7 @@ class ReferenceAttackWrapper:
                     fallback_label,
                 )
 
-            try:
-                with torch.serialization.safe_globals([AttackTrainingSet]):
-                    combined_scores = attack.infer(combined_dataset)
-            except TypeError:
-                # Fallback if safe_globals doesn't support context manager
-                combined_scores = attack.infer(combined_dataset)
+            combined_scores = self._call_with_safe_globals(attack.infer, combined_dataset)
 
             member_scores = np.asarray(combined_scores[:num_member], dtype=float)
             nonmember_scores = np.asarray(combined_scores[num_member:], dtype=float)
@@ -348,22 +429,16 @@ class ReferenceAttackWrapper:
         except Exception as e:
             self.logger.error(f"Error in Shokri attack: {e}", exc_info=True)
             self.logger.warning("Falling back to placeholder...")
-            num_train = len(train_dataloader.dataset)
-            num_test = len(test_dataloader.dataset)
-            member_scores = np.random.uniform(0.5, 1.0, num_train)
-            nonmember_scores = np.random.uniform(0.0, 0.5, num_test)
-            all_predictions = np.concatenate([
-                (member_scores > 0.5).astype(int),
-                (nonmember_scores > 0.5).astype(int)
-            ])
-            return member_scores, nonmember_scores, all_predictions
+            return self._placeholder_result(train_dataloader, test_dataloader)
 
     def run_yeom_attack(
         self,
         target_model: nn.Module,
         train_dataloader: DataLoader,
         test_dataloader: DataLoader,
+        aux_dataloader: Optional[DataLoader] = None,
         device: str = "cuda",
+        batch_size: int = 128,
         attack_seed: int = 42,
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
@@ -383,22 +458,66 @@ class ReferenceAttackWrapper:
         """
         self.logger.info("Running Yeom attack...")
 
-        target_model.to(device)
-        target_model.eval()
+        if not HAS_REFERENCE_YEOM:
+            self.logger.warning("Reference Yeom not available. Using placeholder.")
+            return self._placeholder_result(train_dataloader, test_dataloader)
 
-        # Get confidence scores from model
-        member_scores = self._get_confidence_scores(target_model, train_dataloader, device)
-        nonmember_scores = self._get_confidence_scores(target_model, test_dataloader, device)
+        try:
+            torch_device = torch.device(device)
+            self.logger.info("Using reference implementation from Third_Party_Code/mia-disparity")
 
-        # Yeom attack: classify based on confidence threshold
-        threshold = (np.mean(member_scores) + np.mean(nonmember_scores)) / 2
+            (
+                train_dataset,
+                test_dataset,
+                aux_dataset,
+                train_data,
+                train_labels,
+                test_data,
+                test_labels,
+            ) = self._build_attack_datasets(train_dataloader, test_dataloader, aux_dataloader)
+            num_classes = self._infer_num_classes(target_model, train_labels)
 
-        all_predictions = np.concatenate([
-            (member_scores >= threshold).astype(int),
-            (nonmember_scores >= threshold).astype(int)
-        ])
+            temp_dir = tempfile.mkdtemp()
+            aux_info = YeomAuxiliaryInfo({
+                "seed": attack_seed,
+                "device": torch_device,
+                "num_classes": num_classes,
+                "batch_size": batch_size,
+                "save_path": os.path.join(temp_dir, "yeom"),
+                "log_path": os.path.join(temp_dir, "logs"),
+            })
 
-        return member_scores, nonmember_scores, all_predictions
+            untrained_model = copy.deepcopy(target_model)
+            model_access = YeomModelAccess(
+                model=target_model,
+                untrained_model=untrained_model,
+                access_type=ModelAccessType.BLACK_BOX,
+            )
+
+            attack = YeomAttack(target_model_access=model_access, aux_info=aux_info)
+            prepare_dataset = aux_dataset if aux_dataset is not None else train_dataset
+            if aux_dataset is not None:
+                self.logger.info("Yeom auxiliary dataset size: %d", len(aux_dataset))
+            attack.prepare(prepare_dataset)
+
+            combined_dataset = TensorDataset(
+                torch.cat([train_data, test_data], dim=0),
+                torch.cat([train_labels, test_labels], dim=0),
+            )
+            combined_scores = np.asarray(attack.infer(combined_dataset), dtype=float)
+
+            num_member = len(train_dataset)
+            member_scores = combined_scores[:num_member]
+            nonmember_scores = combined_scores[num_member:]
+
+            all_predictions = self._predictions_by_member_prior(member_scores, nonmember_scores)
+
+            return member_scores, nonmember_scores, all_predictions
+
+        except Exception as e:
+            self.logger.error(f"Error in Yeom attack: {e}", exc_info=True)
+            self.logger.warning("Falling back to placeholder...")
+            return self._placeholder_result(train_dataloader, test_dataloader)
 
     def run_lira_attack(
         self,
@@ -439,57 +558,22 @@ class ReferenceAttackWrapper:
 
         if not HAS_REFERENCE_LIRA:
             self.logger.warning("Reference LIRA not available. Using placeholder.")
-            num_train = len(train_dataloader.dataset) if train_dataloader else 100
-            num_test = len(test_dataloader.dataset) if test_dataloader else 100
-            member_scores = np.random.uniform(0.5, 1.0, num_train)
-            nonmember_scores = np.random.uniform(0.0, 0.5, num_test)
-            return member_scores, nonmember_scores, np.concatenate([np.ones(num_train), np.zeros(num_test)])
+            return self._placeholder_result(train_dataloader, test_dataloader)
 
         try:
             torch_device = torch.device(device)
             self.logger.info("Using reference implementation from Third_Party_Code/mia-disparity")
 
-            # Extract data from dataloaders
-            train_data_list, train_labels_list = [], []
-            for data, labels in train_dataloader:
-                train_data_list.append(data)
-                train_labels_list.append(labels)
-            train_data = torch.cat(train_data_list, dim=0)
-            train_labels = torch.cat(train_labels_list, dim=0)
-
-            test_data_list, test_labels_list = [], []
-            for data, labels in test_dataloader:
-                test_data_list.append(data)
-                test_labels_list.append(labels)
-            test_data = torch.cat(test_data_list, dim=0)
-            test_labels = torch.cat(test_labels_list, dim=0)
-
-            # Create datasets
-            train_dataset = TensorDataset(train_data, train_labels)
-            test_dataset = TensorDataset(test_data, test_labels)
-
-            aux_dataset = None
-            if aux_dataloader is not None:
-                aux_data_list, aux_labels_list = [], []
-                for data, labels in aux_dataloader:
-                    aux_data_list.append(data)
-                    aux_labels_list.append(labels)
-                if aux_data_list:
-                    aux_data = torch.cat(aux_data_list, dim=0)
-                    aux_labels = torch.cat(aux_labels_list, dim=0)
-                    aux_dataset = TensorDataset(aux_data, aux_labels)
-
-            # Determine num_classes
-            num_classes = 10
-            try:
-                if hasattr(target_model, 'fc'):
-                    num_classes = target_model.fc.out_features
-                elif hasattr(target_model, 'classifier'):
-                    num_classes = target_model.classifier.out_features
-                else:
-                    num_classes = len(torch.unique(train_labels))
-            except:
-                pass
+            (
+                train_dataset,
+                test_dataset,
+                aux_dataset,
+                _,
+                train_labels,
+                _,
+                _,
+            ) = self._build_attack_datasets(train_dataloader, test_dataloader, aux_dataloader)
+            num_classes = self._infer_num_classes(target_model, train_labels)
 
             # Create temporary directory for attack artifacts
             temp_dir = tempfile.mkdtemp()
@@ -560,15 +644,7 @@ class ReferenceAttackWrapper:
         except Exception as e:
             self.logger.error(f"Error in LIRA attack: {e}", exc_info=True)
             self.logger.warning("Falling back to placeholder...")
-            num_train = len(train_dataloader.dataset)
-            num_test = len(test_dataloader.dataset)
-            member_scores = np.random.uniform(0.5, 1.0, num_train)
-            nonmember_scores = np.random.uniform(0.0, 0.5, num_test)
-            all_predictions = np.concatenate([
-                (member_scores > 0.5).astype(int),
-                (nonmember_scores > 0.5).astype(int)
-            ])
-            return member_scores, nonmember_scores, all_predictions
+            return self._placeholder_result(train_dataloader, test_dataloader)
 
     def run_reference_attack(
         self,
@@ -577,6 +653,9 @@ class ReferenceAttackWrapper:
         train_dataloader: DataLoader,
         test_dataloader: DataLoader,
         device: str = "cuda",
+        num_shadow_models: int = 29,
+        num_epochs: int = 10,
+        batch_size: int = 128,
         attack_seed: int = 42,
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
@@ -597,18 +676,64 @@ class ReferenceAttackWrapper:
         """
         self.logger.info("Running Reference attack...")
 
-        # Placeholder implementation for reference model attack
-        num_train = len(train_dataloader.dataset)
-        num_test = len(test_dataloader.dataset)
+        if not HAS_REFERENCE_REFERENCE:
+            self.logger.warning("Reference attack implementation not available. Using placeholder.")
+            return self._placeholder_result(train_dataloader, test_dataloader)
 
-        member_scores = np.random.uniform(0.5, 1.0, num_train)
-        nonmember_scores = np.random.uniform(0.0, 0.5, num_test)
-        all_predictions = np.concatenate([
-            np.ones(num_train),
-            np.zeros(num_test)
-        ])
+        try:
+            torch_device = torch.device(device)
+            self.logger.info("Using reference implementation from Third_Party_Code/mia-disparity")
 
-        return member_scores, nonmember_scores, all_predictions
+            (
+                train_dataset,
+                test_dataset,
+                _,
+                _,
+                train_labels,
+                _,
+                _,
+            ) = self._build_attack_datasets(train_dataloader, test_dataloader, aux_dataloader=None)
+            num_classes = self._infer_num_classes(target_model, train_labels)
+
+            temp_dir = tempfile.mkdtemp()
+            aux_info = ReferenceAuxiliaryInfo({
+                "seed": attack_seed,
+                "device": torch_device,
+                "num_shadow_models": num_shadow_models,
+                "epochs": num_epochs,
+                "shadow_batchsize": batch_size,
+                "num_classes": num_classes,
+                "save_path": os.path.join(temp_dir, "reference"),
+                "shadow_path": os.path.join(temp_dir, "reference", "shadow_models"),
+                "log_path": os.path.join(temp_dir, "logs"),
+            })
+
+            untrained_model = copy.deepcopy(target_model)
+            model_access = ReferenceModelAccess(
+                model=target_model,
+                untrained_model=untrained_model,
+                access_type=ModelAccessType.BLACK_BOX,
+            )
+
+            attack = ReferenceAttack(target_model_access=model_access, auxiliary_info=aux_info)
+
+            # The upstream reference attack prepares with an auxiliary set and infers on the target set.
+            # We use member/non-member concat as target set to align downstream metric expectations.
+            attack.prepare(train_dataset)
+            infer_dataset = ConcatDataset([train_dataset, test_dataset])
+            all_scores = np.asarray(attack.infer(infer_dataset), dtype=float)
+
+            num_train = len(train_dataset)
+            member_scores = all_scores[:num_train]
+            nonmember_scores = all_scores[num_train:]
+            all_predictions = self._predictions_by_member_prior(member_scores, nonmember_scores)
+
+            return member_scores, nonmember_scores, all_predictions
+
+        except Exception as e:
+            self.logger.error(f"Error in Reference attack: {e}", exc_info=True)
+            self.logger.warning("Falling back to placeholder...")
+            return self._placeholder_result(train_dataloader, test_dataloader)
 
     def run_losstraj_attack(
         self,
@@ -618,6 +743,7 @@ class ReferenceAttackWrapper:
         device: str = "cuda",
         num_shadow_models: int = 32,
         num_epochs: int = 10,
+        batch_size: int = 128,
         attack_seed: int = 42,
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
@@ -640,16 +766,60 @@ class ReferenceAttackWrapper:
         """
         self.logger.info("Running Loss Trajectory attack...")
 
-        # Placeholder implementation for loss trajectory attack
+        if not HAS_REFERENCE_LOSSTRAJ:
+            self.logger.warning("Reference loss trajectory not available. Using placeholder.")
+            return self._placeholder_result(train_dataloader, test_dataloader)
 
-        num_train = len(train_dataloader.dataset)
-        num_test = len(test_dataloader.dataset)
+        try:
+            torch_device = torch.device(device)
+            self.logger.info("Using reference implementation from Third_Party_Code/mia-disparity")
 
-        member_scores = np.random.uniform(0.5, 1.0, num_train)
-        nonmember_scores = np.random.uniform(0.0, 0.5, num_test)
-        all_predictions = np.concatenate([np.ones(num_train), np.zeros(num_test)])
+            (
+                train_dataset,
+                test_dataset,
+                _,
+                _,
+                train_labels,
+                _,
+                _,
+            ) = self._build_attack_datasets(train_dataloader, test_dataloader, aux_dataloader=None)
+            num_classes = self._infer_num_classes(target_model, train_labels)
 
-        return member_scores, nonmember_scores, all_predictions
+            temp_dir = tempfile.mkdtemp()
+            aux_info = LosstrajAuxiliaryInfo({
+                "seed": attack_seed,
+                "device": torch_device,
+                "batch_size": batch_size,
+                "num_classes": num_classes,
+                "distillation_epochs": num_epochs,
+                "save_path": os.path.join(temp_dir, "losstraj"),
+                "log_path": os.path.join(temp_dir, "logs"),
+            })
+
+            untrained_model = copy.deepcopy(target_model)
+            model_access = LosstrajModelAccess(
+                model=target_model,
+                untrained_model=untrained_model,
+                model_type=ModelAccessType.BLACK_BOX,
+            )
+
+            attack = LosstrajAttack(target_model_access=model_access, auxiliary_info=aux_info)
+            attack.prepare(train_dataset)
+
+            infer_dataset = ConcatDataset([train_dataset, test_dataset])
+            all_scores = np.asarray(attack.infer(infer_dataset), dtype=float)
+
+            num_train = len(train_dataset)
+            member_scores = all_scores[:num_train]
+            nonmember_scores = all_scores[num_train:]
+            all_predictions = self._predictions_by_member_prior(member_scores, nonmember_scores)
+
+            return member_scores, nonmember_scores, all_predictions
+
+        except Exception as e:
+            self.logger.error(f"Error in Loss Trajectory attack: {e}", exc_info=True)
+            self.logger.warning("Falling back to placeholder...")
+            return self._placeholder_result(train_dataloader, test_dataloader)
 
     def run_calibration_attack(
         self,
@@ -688,55 +858,22 @@ class ReferenceAttackWrapper:
 
         if not HAS_REFERENCE_CALIBRATION:
             self.logger.warning("Reference calibration not available. Using placeholder.")
-            num_train = len(train_dataloader.dataset)
-            num_test = len(test_dataloader.dataset)
-            member_scores = np.random.uniform(0.5, 1.0, num_train)
-            nonmember_scores = np.random.uniform(0.0, 0.5, num_test)
-            all_predictions = np.concatenate([np.ones(num_train), np.zeros(num_test)])
-            return member_scores, nonmember_scores, all_predictions
+            return self._placeholder_result(train_dataloader, test_dataloader)
 
         try:
             torch_device = torch.device(device)
             self.logger.info("Using reference implementation from Third_Party_Code/mia-disparity")
 
-            train_data_list, train_labels_list = [], []
-            for data, labels in train_dataloader:
-                train_data_list.append(data)
-                train_labels_list.append(labels)
-            train_data = torch.cat(train_data_list, dim=0)
-            train_labels = torch.cat(train_labels_list, dim=0)
-
-            test_data_list, test_labels_list = [], []
-            for data, labels in test_dataloader:
-                test_data_list.append(data)
-                test_labels_list.append(labels)
-            test_data = torch.cat(test_data_list, dim=0)
-            test_labels = torch.cat(test_labels_list, dim=0)
-
-            train_dataset = TensorDataset(train_data, train_labels)
-            test_dataset = TensorDataset(test_data, test_labels)
-
-            aux_dataset = None
-            if aux_dataloader is not None:
-                aux_data_list, aux_labels_list = [], []
-                for data, labels in aux_dataloader:
-                    aux_data_list.append(data)
-                    aux_labels_list.append(labels)
-                if aux_data_list:
-                    aux_data = torch.cat(aux_data_list, dim=0)
-                    aux_labels = torch.cat(aux_labels_list, dim=0)
-                    aux_dataset = TensorDataset(aux_data, aux_labels)
-
-            num_classes = 10
-            try:
-                if hasattr(target_model, 'fc'):
-                    num_classes = target_model.fc.out_features
-                elif hasattr(target_model, 'classifier'):
-                    num_classes = target_model.classifier.out_features
-                else:
-                    num_classes = len(torch.unique(train_labels))
-            except Exception:
-                pass
+            (
+                train_dataset,
+                test_dataset,
+                aux_dataset,
+                _,
+                train_labels,
+                _,
+                _,
+            ) = self._build_attack_datasets(train_dataloader, test_dataloader, aux_dataloader)
+            num_classes = self._infer_num_classes(target_model, train_labels)
 
             temp_dir = tempfile.mkdtemp()
 
@@ -797,15 +934,7 @@ class ReferenceAttackWrapper:
         except Exception as e:
             self.logger.error(f"Error in calibration attack: {e}", exc_info=True)
             self.logger.warning("Falling back to placeholder...")
-            num_train = len(train_dataloader.dataset)
-            num_test = len(test_dataloader.dataset)
-            member_scores = np.random.uniform(0.5, 1.0, num_train)
-            nonmember_scores = np.random.uniform(0.0, 0.5, num_test)
-            all_predictions = np.concatenate([
-                (member_scores > 0.5).astype(int),
-                (nonmember_scores > 0.5).astype(int)
-            ])
-            return member_scores, nonmember_scores, all_predictions
+            return self._placeholder_result(train_dataloader, test_dataloader)
 
     def run_augmentation_attack(
         self,
@@ -847,60 +976,22 @@ class ReferenceAttackWrapper:
 
         if not HAS_REFERENCE_AUGMENTATION:
             self.logger.warning("Reference augmentation not available. Using placeholder.")
-            num_train = len(train_dataloader.dataset)
-            num_test = len(test_dataloader.dataset)
-            member_scores = np.random.uniform(0.5, 1.0, num_train)
-            nonmember_scores = np.random.uniform(0.0, 0.5, num_test)
-            return member_scores, nonmember_scores, np.concatenate([np.ones(num_train), np.zeros(num_test)])
+            return self._placeholder_result(train_dataloader, test_dataloader)
 
         try:
-            import copy
-            import tempfile
-
             torch_device = torch.device(device)
             self.logger.info("Using reference implementation from Third_Party_Code/mia-disparity")
 
-            # Extract data from dataloaders
-            train_data_list, train_labels_list = [], []
-            for data, labels in train_dataloader:
-                train_data_list.append(data)
-                train_labels_list.append(labels)
-            train_data = torch.cat(train_data_list, dim=0)
-            train_labels = torch.cat(train_labels_list, dim=0)
-
-            test_data_list, test_labels_list = [], []
-            for data, labels in test_dataloader:
-                test_data_list.append(data)
-                test_labels_list.append(labels)
-            test_data = torch.cat(test_data_list, dim=0)
-            test_labels = torch.cat(test_labels_list, dim=0)
-
-            # Create datasets
-            train_dataset = TensorDataset(train_data, train_labels)
-            test_dataset = TensorDataset(test_data, test_labels)
-
-            aux_dataset = None
-            if aux_dataloader is not None:
-                aux_data_list, aux_labels_list = [], []
-                for data, labels in aux_dataloader:
-                    aux_data_list.append(data)
-                    aux_labels_list.append(labels)
-                if aux_data_list:
-                    aux_data = torch.cat(aux_data_list, dim=0)
-                    aux_labels = torch.cat(aux_labels_list, dim=0)
-                    aux_dataset = TensorDataset(aux_data, aux_labels)
-
-            # Determine num_classes
-            num_classes = 10
-            try:
-                if hasattr(target_model, 'fc'):
-                    num_classes = target_model.fc.out_features
-                elif hasattr(target_model, 'classifier'):
-                    num_classes = target_model.classifier.out_features
-                else:
-                    num_classes = len(torch.unique(train_labels))
-            except:
-                pass
+            (
+                train_dataset,
+                test_dataset,
+                aux_dataset,
+                _,
+                train_labels,
+                _,
+                _,
+            ) = self._build_attack_datasets(train_dataloader, test_dataloader, aux_dataloader)
+            num_classes = self._infer_num_classes(target_model, train_labels)
 
             # Create temporary directory for attack artifacts
             temp_dir = tempfile.mkdtemp()
@@ -941,23 +1032,12 @@ class ReferenceAttackWrapper:
             if aux_dataset is not None:
                 self.logger.info("Augmentation auxiliary dataset size: %d", len(aux_dataset))
             
-            try:
-                with torch.serialization.safe_globals([AttackTrainingSet]):
-                    attack.prepare(prepare_dataset)
-            except TypeError:
-                # Fallback if safe_globals doesn't support context manager
-                attack.prepare(prepare_dataset)
+            self._call_with_safe_globals(attack.prepare, prepare_dataset)
 
             # Get membership scores with safe globals context
             self.logger.info("Inferring membership...")
-            try:
-                with torch.serialization.safe_globals([AttackTrainingSet]):
-                    member_scores = attack.infer(train_dataset)
-                    nonmember_scores = attack.infer(test_dataset)
-            except TypeError:
-                # Fallback if safe_globals doesn't support context manager
-                member_scores = attack.infer(train_dataset)
-                nonmember_scores = attack.infer(test_dataset)
+            member_scores = self._call_with_safe_globals(attack.infer, train_dataset)
+            nonmember_scores = self._call_with_safe_globals(attack.infer, test_dataset)
 
             # Clip to [0, 1]
             member_scores = np.clip(member_scores, 0, 1)
@@ -980,15 +1060,7 @@ class ReferenceAttackWrapper:
         except Exception as e:
             self.logger.error(f"Error in augmentation attack: {e}", exc_info=True)
             self.logger.warning("Falling back to placeholder...")
-            num_train = len(train_dataloader.dataset)
-            num_test = len(test_dataloader.dataset)
-            member_scores = np.random.uniform(0.5, 1.0, num_train)
-            nonmember_scores = np.random.uniform(0.0, 0.5, num_test)
-            all_predictions = np.concatenate([
-                (member_scores > 0.5).astype(int),
-                (nonmember_scores > 0.5).astype(int)
-            ])
-            return member_scores, nonmember_scores, all_predictions
+            return self._placeholder_result(train_dataloader, test_dataloader)
 
 
     def _get_confidence_scores(
@@ -1094,111 +1166,44 @@ class AttackFactory:
 
         self.logger.info(f"Creating attack: {attack_name}")
 
-        if attack_name == "shokri":
-            attack_params = self._prepare_params(
-                attack_name,
-                attack_config.params,
-                self.wrapper.run_shokri_attack,
-            )
-            member_scores, nonmember_scores, predictions = self.wrapper.run_shokri_attack(
-                target_model=target_model,
-                train_dataloader=train_dataloader,
-                test_dataloader=test_dataloader,
-                aux_dataloader=aux_dataloader,
-                device=device,
-                **attack_params
-            )
+        attack_methods = {
+            "shokri": self.wrapper.run_shokri_attack,
+            "yeom": self.wrapper.run_yeom_attack,
+            "lira": self.wrapper.run_lira_attack,
+            "reference": self.wrapper.run_reference_attack,
+            "losstraj": self.wrapper.run_losstraj_attack,
+            "calibration": self.wrapper.run_calibration_attack,
+            "augmentation": self.wrapper.run_augmentation_attack,
+        }
 
-        elif attack_name == "yeom":
-            attack_params = self._prepare_params(
-                attack_name,
-                attack_config.params,
-                self.wrapper.run_yeom_attack,
-            )
-            member_scores, nonmember_scores, predictions = self.wrapper.run_yeom_attack(
-                target_model=target_model,
-                train_dataloader=train_dataloader,
-                test_dataloader=test_dataloader,
-                device=device,
-                **attack_params
-            )
-
-        elif attack_name == "lira":
-            attack_params = self._prepare_params(
-                attack_name,
-                attack_config.params,
-                self.wrapper.run_lira_attack,
-            )
-            member_scores, nonmember_scores, predictions = self.wrapper.run_lira_attack(
-                target_model=target_model,
-                train_dataloader=train_dataloader,
-                test_dataloader=test_dataloader,
-                aux_dataloader=aux_dataloader,
-                device=device,
-                **attack_params
-            )
-
-        elif attack_name == "reference":
-            attack_params = self._prepare_params(
-                attack_name,
-                attack_config.params,
-                self.wrapper.run_reference_attack,
-            )
-            member_scores, nonmember_scores, predictions = self.wrapper.run_reference_attack(
-                target_model=target_model,
-                reference_models=[],  # Would be provided in real scenario
-                train_dataloader=train_dataloader,
-                test_dataloader=test_dataloader,
-                device=device,
-                **attack_params
-            )
-
-        elif attack_name == "losstraj":
-            attack_params = self._prepare_params(
-                attack_name,
-                attack_config.params,
-                self.wrapper.run_losstraj_attack,
-            )
-            member_scores, nonmember_scores, predictions = self.wrapper.run_losstraj_attack(
-                target_model=target_model,
-                train_dataloader=train_dataloader,
-                test_dataloader=test_dataloader,
-                device=device,
-                **attack_params
-            )
-
-        elif attack_name == "calibration":
-            attack_params = self._prepare_params(
-                attack_name,
-                attack_config.params,
-                self.wrapper.run_calibration_attack,
-            )
-            member_scores, nonmember_scores, predictions = self.wrapper.run_calibration_attack(
-                target_model=target_model,
-                train_dataloader=train_dataloader,
-                test_dataloader=test_dataloader,
-                aux_dataloader=aux_dataloader,
-                device=device,
-                **attack_params
-            )
-
-        elif attack_name == "augmentation":
-            attack_params = self._prepare_params(
-                attack_name,
-                attack_config.params,
-                self.wrapper.run_augmentation_attack,
-            )
-            member_scores, nonmember_scores, predictions = self.wrapper.run_augmentation_attack(
-                target_model=target_model,
-                train_dataloader=train_dataloader,
-                test_dataloader=test_dataloader,
-                aux_dataloader=aux_dataloader,
-                device=device,
-                **attack_params
-            )
-
-        else:
+        method = attack_methods.get(attack_name)
+        if method is None:
             raise ValueError(f"Unknown attack: {attack_name}")
+
+        attack_params = self._prepare_params(
+            attack_name,
+            attack_config.params,
+            method,
+        )
+
+        base_kwargs = {
+            "target_model": target_model,
+            "train_dataloader": train_dataloader,
+            "test_dataloader": test_dataloader,
+            "aux_dataloader": aux_dataloader,
+            "device": device,
+            "reference_models": [],  # Placeholder until reference models are explicitly wired.
+        }
+
+        supported_keys = set(inspect.signature(method).parameters.keys())
+        method_kwargs = {
+            key: value for key, value in base_kwargs.items() if key in supported_keys
+        }
+
+        member_scores, nonmember_scores, predictions = method(
+            **method_kwargs,
+            **attack_params,
+        )
 
         # Get member indices (assumes first half of merged data are members)
         num_members = len(train_dataloader.dataset) if train_dataloader else 0
