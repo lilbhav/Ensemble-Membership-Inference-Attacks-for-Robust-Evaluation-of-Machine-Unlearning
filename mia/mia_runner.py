@@ -114,9 +114,24 @@ class AttackResult:
         # Compute ROC curve
         fpr, tpr, thresholds = roc_curve(ground_truth_labels, all_scores)
 
-        # Compute TPR at low FPR (0.01 and 0.001 are common)
-        tpr_at_fpr_001 = tpr[np.argmin(np.abs(fpr - 0.01))]
-        tpr_at_fpr_0001 = tpr[np.argmin(np.abs(fpr - 0.001))]
+        # Compute TPR at target FPR with interpolation instead of nearest-point snapping.
+        # Nearest-point can under-report when ROC has coarse steps under class imbalance.
+        def _interp_tpr_at_fpr(target_fpr: float) -> float:
+            target_fpr = float(np.clip(target_fpr, 0.0, 1.0))
+
+            # Keep monotone envelope in case of repeated FPR values.
+            fpr_unique, first_idx = np.unique(fpr, return_index=True)
+            tpr_unique = tpr[first_idx]
+            tpr_unique = np.maximum.accumulate(tpr_unique)
+
+            return float(np.interp(target_fpr, fpr_unique, tpr_unique))
+
+        tpr_at_fpr_001 = _interp_tpr_at_fpr(0.01)
+        tpr_at_fpr_0001 = _interp_tpr_at_fpr(0.001)
+
+        # Useful for interpreting low-FPR metrics under extreme imbalance.
+        num_negative = int(np.sum(ground_truth_labels == 0))
+        min_nonzero_fpr = (1.0 / num_negative) if num_negative > 0 else 1.0
 
         # Compute accuracy
         accuracy = np.mean(self.all_predictions == ground_truth_labels)
@@ -127,6 +142,7 @@ class AttackResult:
             "tpr_at_fpr_0.01": float(tpr_at_fpr_001),
             "tpr_at_fpr_0.001": float(tpr_at_fpr_0001),
             "accuracy": float(accuracy),
+            "min_nonzero_fpr": float(min_nonzero_fpr),
         }
 
         return self.metrics
