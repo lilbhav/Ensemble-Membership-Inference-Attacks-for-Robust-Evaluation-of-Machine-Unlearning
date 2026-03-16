@@ -135,6 +135,7 @@ class ReferenceAttackWrapper:
         shadow_models: Optional[list] = None,
         train_dataloader: Optional[DataLoader] = None,
         test_dataloader: Optional[DataLoader] = None,
+        aux_dataloader: Optional[DataLoader] = None,
         device: str = "cuda",
         num_shadow_models: int = 10,
         num_epochs: int = 10,
@@ -196,6 +197,17 @@ class ReferenceAttackWrapper:
             train_dataset = TensorDataset(train_data, train_labels)
             test_dataset = TensorDataset(test_data, test_labels)
 
+            aux_dataset = None
+            if aux_dataloader is not None:
+                aux_data_list, aux_labels_list = [], []
+                for data, labels in aux_dataloader:
+                    aux_data_list.append(data)
+                    aux_labels_list.append(labels)
+                if aux_data_list:
+                    aux_data = torch.cat(aux_data_list, dim=0)
+                    aux_labels = torch.cat(aux_labels_list, dim=0)
+                    aux_dataset = TensorDataset(aux_data, aux_labels)
+
             # Determine num_classes
             num_classes = 10
             try:
@@ -246,14 +258,17 @@ class ReferenceAttackWrapper:
             # Run attack with safe globals context for PyTorch 2.6
             self.logger.info("Preparing Shokri attack (training shadow models)...")
             attack = ShokriAttack(target_model_access=model_access, auxiliary_info=aux_info)
+            prepare_dataset = aux_dataset if aux_dataset is not None else train_dataset
+            if aux_dataset is not None:
+                self.logger.info("Shokri auxiliary dataset size: %d", len(aux_dataset))
             
             # Use context manager for safe unpickling of custom classes
             try:
                 with torch.serialization.safe_globals([AttackTrainingSet]):
-                    attack.prepare(train_dataset)
+                    attack.prepare(prepare_dataset)
             except TypeError:
                 # Fallback if safe_globals doesn't support context manager
-                attack.prepare(train_dataset)
+                attack.prepare(prepare_dataset)
             except Exception as prepare_error:
                 # PyTorch 2.6+ may still block custom pickled objects depending on backend
                 # and internal load path. Since this artifact is generated in-run by trusted
@@ -270,7 +285,7 @@ class ReferenceAttackWrapper:
 
                     torch.load = _trusted_load
                     try:
-                        attack.prepare(train_dataset)
+                        attack.prepare(prepare_dataset)
                     finally:
                         torch.load = original_torch_load
                 else:
@@ -641,6 +656,7 @@ class ReferenceAttackWrapper:
         target_model: nn.Module,
         train_dataloader: DataLoader,
         test_dataloader: DataLoader,
+        aux_dataloader: Optional[DataLoader] = None,
         device: str = "cuda",
         num_shadow_models: int = 4,
         num_shadow_epochs: int = 20,
@@ -700,6 +716,17 @@ class ReferenceAttackWrapper:
             train_dataset = TensorDataset(train_data, train_labels)
             test_dataset = TensorDataset(test_data, test_labels)
 
+            aux_dataset = None
+            if aux_dataloader is not None:
+                aux_data_list, aux_labels_list = [], []
+                for data, labels in aux_dataloader:
+                    aux_data_list.append(data)
+                    aux_labels_list.append(labels)
+                if aux_data_list:
+                    aux_data = torch.cat(aux_data_list, dim=0)
+                    aux_labels = torch.cat(aux_labels_list, dim=0)
+                    aux_dataset = TensorDataset(aux_data, aux_labels)
+
             num_classes = 10
             try:
                 if hasattr(target_model, 'fc'):
@@ -740,7 +767,10 @@ class ReferenceAttackWrapper:
 
             self.logger.info("Preparing calibration attack...")
             attack = CalibrationAttack(target_model_access=model_access, aux_info=aux_info)
-            attack.prepare(train_dataset)
+            prepare_dataset = aux_dataset if aux_dataset is not None else train_dataset
+            if aux_dataset is not None:
+                self.logger.info("Calibration auxiliary dataset size: %d", len(aux_dataset))
+            attack.prepare(prepare_dataset)
 
             self.logger.info("Inferring membership...")
             member_scores = attack.infer(train_dataset)
@@ -782,6 +812,7 @@ class ReferenceAttackWrapper:
         target_model: nn.Module,
         train_dataloader: DataLoader,
         test_dataloader: DataLoader,
+        aux_dataloader: Optional[DataLoader] = None,
         device: str = "cuda",
         augmentation_type: str = "d",
         augment_kwarg: int = 2,
@@ -848,6 +879,17 @@ class ReferenceAttackWrapper:
             train_dataset = TensorDataset(train_data, train_labels)
             test_dataset = TensorDataset(test_data, test_labels)
 
+            aux_dataset = None
+            if aux_dataloader is not None:
+                aux_data_list, aux_labels_list = [], []
+                for data, labels in aux_dataloader:
+                    aux_data_list.append(data)
+                    aux_labels_list.append(labels)
+                if aux_data_list:
+                    aux_data = torch.cat(aux_data_list, dim=0)
+                    aux_labels = torch.cat(aux_labels_list, dim=0)
+                    aux_dataset = TensorDataset(aux_data, aux_labels)
+
             # Determine num_classes
             num_classes = 10
             try:
@@ -895,13 +937,16 @@ class ReferenceAttackWrapper:
             # Run attack with safe globals context
             self.logger.info("Preparing augmentation attack (training shadow model)...")
             attack = AugAttack(target_model_access=model_access, auxiliary_info=aux_info)
+            prepare_dataset = aux_dataset if aux_dataset is not None else train_dataset
+            if aux_dataset is not None:
+                self.logger.info("Augmentation auxiliary dataset size: %d", len(aux_dataset))
             
             try:
                 with torch.serialization.safe_globals([AttackTrainingSet]):
-                    attack.prepare(train_dataset)
+                    attack.prepare(prepare_dataset)
             except TypeError:
                 # Fallback if safe_globals doesn't support context manager
-                attack.prepare(train_dataset)
+                attack.prepare(prepare_dataset)
 
             # Get membership scores with safe globals context
             self.logger.info("Inferring membership...")
@@ -1059,6 +1104,7 @@ class AttackFactory:
                 target_model=target_model,
                 train_dataloader=train_dataloader,
                 test_dataloader=test_dataloader,
+                aux_dataloader=aux_dataloader,
                 device=device,
                 **attack_params
             )
@@ -1131,6 +1177,7 @@ class AttackFactory:
                 target_model=target_model,
                 train_dataloader=train_dataloader,
                 test_dataloader=test_dataloader,
+                aux_dataloader=aux_dataloader,
                 device=device,
                 **attack_params
             )
@@ -1145,6 +1192,7 @@ class AttackFactory:
                 target_model=target_model,
                 train_dataloader=train_dataloader,
                 test_dataloader=test_dataloader,
+                aux_dataloader=aux_dataloader,
                 device=device,
                 **attack_params
             )
