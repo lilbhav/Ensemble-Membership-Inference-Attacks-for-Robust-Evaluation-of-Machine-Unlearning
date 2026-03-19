@@ -6,7 +6,7 @@ experiment:
 dataset:
   name: "cifar10"
   data_root: "/content/data/raw"
-  split_dir: "/content/gdrive/My Drive/mia_splits/scrub_fully_random"
+  split_dir: "/content/gdrive/My Drive/mia_splits/scrub_targeted_random"
   forget_fraction: 0.2
   retain_fraction: 0.8
   num_classes: 10
@@ -20,8 +20,10 @@ unlearning:
   method: "scrub"   # [fine_tune, grad_ascent, scrub, ssd]
   checkpoint_path: "/content/gdrive/My Drive/mia_checkpoints/scrub_unlearned_model.pt"
   params:
-    split_protocol: "fully_random"
+    split_protocol: "targeted_random"
+    forget_class: 3  # 0=airplane 1=automobile 2=bird 3=cat 4=deer 5=dog 6=frog 7=horse 8=ship 9=truck
     # Data protocol — must match the split used during SCRUB/SSD unlearning.
+    # Retain: 100/class x 9 classes = 900 | Left-out: 25/class x 9 classes = 225
     retain_count: 900
     forget_count: 25
     left_out_count: 225
@@ -52,13 +54,6 @@ unlearning:
     lr_decay_rate: 0
     sgda_weight_decay: 0
     sgda_momentum: 0.9
-
-    # Selection controls
-    selection_weight: 2.2
-    delta_selection_weight: 1.8
-    min_selected_vr: 0.86
-    min_forget_drop: 0.003
-    max_retain_drop: 0.04
 
   # method: "ssd"
   # checkpoint_path: "/content/gdrive/My Drive/mia_checkpoints/ssd_unlearned_model.pt"

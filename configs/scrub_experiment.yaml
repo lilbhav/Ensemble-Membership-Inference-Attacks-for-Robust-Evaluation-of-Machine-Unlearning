@@ -1,7 +1,7 @@
 dataset: cifar10
 dataroot: /content/data/raw
 seed: 42
-split_dir: /content/gdrive/My Drive/mia_splits/scrub_fully_random
+split_dir: /content/gdrive/My Drive/mia_splits/scrub_targeted_random
 
 # Transfer setup: pretrain on CIFAR-100, replace final layer, fine-tune on CIFAR-10.
 source_checkpoint_cifar100: /content/gdrive/My Drive/mia_checkpoints/pretrained_cifar100.pt
@@ -11,8 +11,11 @@ transfer_finetune_batch_size: 128
 transfer_finetune_learning_rate: 0.001
 rebuild_transfer_checkpoint: false
 
-# Fully-random split setup: forget samples drawn from any class.
-split_protocol: "fully_random"
+# Targeted-random split setup: forget samples from one class only.
+# Retain: 100 samples/class x 9 non-forget classes = 900
+# Left-out: 25 samples/class x 9 non-forget classes = 225
+split_protocol: "targeted_random"
+forget_class: 3  # 0=airplane 1=automobile 2=bird 3=cat 4=deer 5=dog 6=frog 7=horse 8=ship 9=truck
 retain_count: 900
 forget_count: 25
 left_out_count: 225
@@ -32,23 +35,16 @@ gamma: 1
 alpha: 0.9
 beta: 0.8
 smoothing: 0.0
-msteps: 12
+msteps: 10
 clip: 0.2
 sstart: 10
 kd_T: 1
 distill: kd
 sgda_batch_size: 64
 del_batch_size: 32
-sgda_epochs: 8
+sgda_epochs: 10
 sgda_learning_rate: 0.001
 lr_decay_epochs: []
 lr_decay_rate: 0
 sgda_weight_decay: 0
 sgda_momentum: 0.9
-
-# Optional selection controls
-selection_weight: 2.2
-delta_selection_weight: 1.8
-min_selected_vr: 0.93
-min_forget_drop: 0.10
-max_retain_drop: 0.04

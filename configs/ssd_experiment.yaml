@@ -2,7 +2,7 @@ dataset: cifar10
 dataroot: /content/data/raw
 forget_fraction: 0.2
 seed: 42
-split_dir: /content/gdrive/My Drive/mia_splits/ssd_fully_random
+split_dir: /content/gdrive/My Drive/mia_splits/ssd_targeted_random
 batch_size: 128
 num_workers: 2
 pin_memory: true
@@ -15,8 +15,11 @@ transfer_finetune_batch_size: 128
 transfer_finetune_learning_rate: 0.001
 rebuild_transfer_checkpoint: false
 
-# Fully-random split setup: forget samples drawn from any class.
-split_protocol: "fully_random"
+# Targeted-random split setup: forget samples from one class only.
+# Retain: 100 samples/class x 9 non-forget classes = 900
+# Left-out: 25 samples/class x 9 non-forget classes = 225
+split_protocol: "targeted_random"
+forget_class: 3  # 0=airplane 1=automobile 2=bird 3=cat 4=deer 5=dog 6=frog 7=horse 8=ship 9=truck
 retain_count: 900
 forget_count: 25
 left_out_count: 225
@@ -39,8 +42,8 @@ exponent: 1.0
 forget_threshold: 1.0
 min_layer: -1
 max_layer: -1
-dampening_constant: 0.6
-selection_weighting: 70
+dampening_constant: 1
+selection_weighting: 5
 
 eval_every: 1
 print_accuracies: true
