@@ -36,14 +36,14 @@ learning_rate: 0.1
 #   ~391 batches, so the raw magnitudes are ~391x less normalized. A much higher alpha is needed
 #   to compensate for this scale imbalance and avoid catching shared parameters.
 # dampening_constant (lambda): dampening scale = (lambda * retain_imp / forget_imp)^exponent.
-#   Lower = less aggressive dampening on selected params.
+#   Lower = more aggressive dampening on selected params.
 lower_bound: 1.0
 exponent: 1.0
 forget_threshold: 1.0
 min_layer: -1
 max_layer: -1
 dampening_constant: 1
-selection_weighting: 5
+selection_weighting: 20
 
 eval_every: 1
 print_accuracies: true
