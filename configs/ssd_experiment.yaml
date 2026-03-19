@@ -43,7 +43,7 @@ forget_threshold: 1.0
 min_layer: -1
 max_layer: -1
 dampening_constant: 1
-selection_weighting: 50
+selection_weighting: 70
 
 eval_every: 1
 print_accuracies: true
