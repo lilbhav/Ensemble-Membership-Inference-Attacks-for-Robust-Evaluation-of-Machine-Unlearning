@@ -1,0 +1,36 @@
+dataset: cifar10
+dataroot: /content/data/raw
+forget_fraction: 0.2
+seed: 42
+split_dir: /content/gdrive/My Drive/mia_splits/amnesiac_targeted_random
+batch_size: 128
+num_workers: 2
+pin_memory: true
+
+# Transfer setup: pretrain on CIFAR-100, replace final layer, fine-tune on CIFAR-10.
+source_checkpoint_cifar100: /content/gdrive/My Drive/mia_checkpoints/pretrained_cifar100.pt
+model_path: /content/gdrive/My Drive/mia_checkpoints/finetuned_cifar10_from_cifar100.pt
+transfer_finetune_epochs: 10
+transfer_finetune_batch_size: 128
+transfer_finetune_learning_rate: 0.001
+rebuild_transfer_checkpoint: false
+
+# Targeted-random split setup: forget samples from one class only.
+# Retain: 100 samples/class x 9 non-forget classes = 900
+# Left-out: 25 samples/class x 9 non-forget classes = 225
+split_protocol: "targeted_random"
+forget_class: 3
+retain_count: 900
+forget_count: 25
+left_out_count: 225
+
+check_path: /content/gdrive/My Drive/mia_checkpoints/amnesiac_unlearned_model.pt
+results_path: /content/gdrive/My Drive/mia_checkpoints/amnesiac_results.txt
+print_accuracies: true
+
+# Amnesiac hyperparameters
+learning_rate: 0.001
+unlearn_epochs: 5
+
+eval_every: 1
+device: null

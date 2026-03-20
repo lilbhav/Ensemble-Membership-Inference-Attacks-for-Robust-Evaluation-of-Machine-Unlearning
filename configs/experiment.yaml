@@ -17,7 +17,7 @@ model:
   checkpoint_path: "./checkpoints/full_model.pt"
 
 unlearning:
-  method: "scrub"   # [fine_tune, grad_ascent, scrub, ssd]
+  method: "scrub"   # [fine_tune, grad_ascent, scrub, ssd, bad_teacher, amnesiac]
   checkpoint_path: "/content/gdrive/My Drive/mia_checkpoints/scrub_unlearned_model.pt"
   params:
     split_protocol: "targeted_random"

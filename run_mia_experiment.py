@@ -711,6 +711,8 @@ Examples:
   python run_mia_experiment.py --config configs/finetune_experiment.yaml -o results/finetune
   python run_mia_experiment.py --config configs/scrub_experiment.yaml -o results/scrub
   python run_mia_experiment.py --config configs/ssd_experiment.yaml -o results/ssd
+    python run_mia_experiment.py --config configs/bad_teacher_experiment.yaml -o results/bad_teacher
+    python run_mia_experiment.py --config configs/amnesiac_experiment.yaml -o results/amnesiac
         """
     )
     
