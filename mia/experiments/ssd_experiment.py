@@ -9,6 +9,7 @@ import argparse
 from dataclasses import dataclass, replace
 from typing import Dict, Optional
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torchvision.models as models
@@ -26,14 +27,16 @@ if TP_MACHINEUNLEARNING_ROOT not in sys.path:
 
 from data.loaders import load_dataset, get_num_classes
 from utils.splits import ensure_retain_forget_split, ensure_targeted_random_unlearning_split, ensure_fully_random_unlearning_split
-from utils.metrics import evaluate_split_metrics, log_accuracies
+from utils.metrics import evaluate_split_metrics, log_accuracies, report_weight_diff
 from utils.transfer_setup import ensure_cifar10_from_cifar100_transfer_checkpoint
 from utils.unlearning_results import (
     build_epoch_record,
     build_unlearning_summary,
+    make_run_tag,
     resolve_unlearning_artifact_paths,
     save_unlearning_history_csv,
     save_unlearning_summary,
+    to_serializable_dict,
 )
 
 # Third-party strategy import (delegate algorithm implementation here)
@@ -82,6 +85,7 @@ class SSDInput:
     unlearn_epochs: int = 1
     summary_path: Optional[str] = None
     history_path: Optional[str] = None
+    selection_delta: float = 0.0
 
 
 def train_validation(
@@ -130,6 +134,216 @@ def _infer_forget_class(forget_dataset) -> int:
     return max(label_counts.items(), key=lambda kv: kv[1])[0]
 
 
+# ---------------------------------------------------------------------------
+# Debug helpers — label-mismatch / logit / argmax diagnostics
+# ---------------------------------------------------------------------------
+
+_CIFAR10_CLASSES = [
+    "airplane", "automobile", "bird", "cat", "deer",
+    "dog", "frog", "horse", "ship", "truck",
+]
+
+
+def _debug_forget_label_distribution(forget_dataset, prefix: str = "") -> None:
+    """Print the raw label distribution of the forget subset without loading images."""
+    from torch.utils.data import Subset as _Subset
+
+    tag = f"[DEBUG{' ' + prefix if prefix else ''}]"
+
+    # Fast path: walk the Subset chain and index into dataset.targets directly.
+    base = forget_dataset
+    chain = []
+    while isinstance(base, _Subset):
+        chain.append(np.asarray(base.indices, dtype=int))
+        base = base.dataset
+
+    raw_targets = getattr(base, "targets", None) or getattr(base, "labels", None)
+    if raw_targets is not None:
+        targets_arr = np.asarray(raw_targets, dtype=int)
+        for idx_arr in reversed(chain):
+            targets_arr = targets_arr[idx_arr]
+        labels = targets_arr.tolist()
+    else:
+        # Fallback: iterate items (slower — loads images).
+        labels = []
+        for sample in forget_dataset:
+            if isinstance(sample, tuple) and len(sample) >= 2:
+                labels.append(int(sample[1]))
+
+    label_counts: Dict[int, int] = {}
+    for lbl in labels:
+        label_counts[lbl] = label_counts.get(lbl, 0) + 1
+
+    print(
+        f"{tag} Forget-set raw label distribution ({len(labels)} samples): "
+        f"{dict(sorted(label_counts.items()))}"
+    )
+    if len(label_counts) == 1:
+        only = next(iter(label_counts))
+        name = _CIFAR10_CLASSES[only] if 0 <= only < len(_CIFAR10_CLASSES) else f"cls{only}"
+        print(f"{tag}   → single-class forget set: class {only} ({name})")
+    else:
+        print(
+            f"{tag}   → multi-class forget set "
+            f"({len(label_counts)} distinct classes: {sorted(label_counts.keys())})"
+        )
+
+
+def debug_forget_predictions(
+    model: nn.Module,
+    forget_loader: DataLoader,
+    device: torch.device,
+    max_samples: int = 20,
+    forget_class: Optional[int] = None,
+    prefix: str = "",
+) -> None:
+    """
+    Run the first *max_samples* forget-set items through the model and print:
+      - per-sample: true label, predicted label, full logit vector, pred-true offset.
+      - summary: logit range/std, dominant predicted class, and four targeted warnings:
+          1. Dead-output  : logit range ≈ 0 (weights zeroed out).
+          2. Pred-collapse: all predictions map to one class that is not the true class.
+          3. Constant shift: pred-true offset is constant and non-zero across all samples
+                             (label-index off-by-one / modular wrapping / wrong dataset).
+          4. Config mismatch: forget-set true label != args.forget_class.
+    """
+    tag = f"[DEBUG{' ' + prefix if prefix else ''}]"
+    print("=" * 72)
+    print(f"{tag} Forget-set prediction diagnostics (first {max_samples} samples)")
+    if forget_class is not None:
+        fc_name = (
+            _CIFAR10_CLASSES[forget_class]
+            if 0 <= forget_class < len(_CIFAR10_CLASSES)
+            else "?"
+        )
+        print(f"{tag} args.forget_class = {forget_class} ({fc_name})")
+    print("=" * 72)
+
+    was_training = model.training
+    model.eval()
+
+    samples_shown = 0
+    true_labels_seen: set = set()
+    pred_labels_seen: set = set()
+    all_logits_rows = []
+    offsets: list = []
+
+    with torch.no_grad():
+        for batch in forget_loader:
+            if samples_shown >= max_samples:
+                break
+            if len(batch) == 3:
+                imgs, _, targets = batch
+            else:
+                imgs, targets = batch
+            imgs = imgs.to(device)
+            logits_batch = model(imgs).cpu()
+            preds_batch = torch.argmax(logits_batch, dim=1)
+            targets_cpu = targets.cpu()
+
+            for i in range(len(targets_cpu)):
+                if samples_shown >= max_samples:
+                    break
+                true_lbl = int(targets_cpu[i].item())
+                pred_lbl = int(preds_batch[i].item())
+                logit_vec = logits_batch[i].tolist()
+                all_logits_rows.append(logit_vec)
+                offsets.append(pred_lbl - true_lbl)
+
+                true_name = (
+                    _CIFAR10_CLASSES[true_lbl]
+                    if 0 <= true_lbl < len(_CIFAR10_CLASSES)
+                    else f"cls{true_lbl}"
+                )
+                pred_name = (
+                    _CIFAR10_CLASSES[pred_lbl]
+                    if 0 <= pred_lbl < len(_CIFAR10_CLASSES)
+                    else f"cls{pred_lbl}"
+                )
+                correct_marker = "OK   " if true_lbl == pred_lbl else "WRONG"
+                shift = pred_lbl - true_lbl
+                shift_tag = (
+                    f"  [shift={shift:+d} → possible label-index offset]"
+                    if shift != 0
+                    else ""
+                )
+                logit_str = ", ".join(f"{v:7.3f}" for v in logit_vec)
+
+                print(
+                    f"  {samples_shown:02d}: true={true_lbl}({true_name:<10s}) "
+                    f"pred={pred_lbl}({pred_name:<10s}) [{correct_marker}]{shift_tag}"
+                )
+                print(f"       logits=[{logit_str}]")
+
+                true_labels_seen.add(true_lbl)
+                pred_labels_seen.add(pred_lbl)
+                samples_shown += 1
+
+    if was_training:
+        model.train()
+
+    # ── Summary diagnostics ──────────────────────────────────────────────────
+    print("-" * 72)
+    print(f"{tag} Unique true  labels in sample : {sorted(true_labels_seen)}")
+    print(f"{tag} Unique pred  labels in sample : {sorted(pred_labels_seen)}")
+
+    if all_logits_rows:
+        arr = np.array(all_logits_rows, dtype=np.float32)   # [N, C]
+        logit_range = float(arr.max() - arr.min())
+        logit_std   = float(arr.std())
+        dom_cls     = int(np.bincount(np.argmax(arr, axis=1)).argmax())
+        dom_name    = (
+            _CIFAR10_CLASSES[dom_cls]
+            if 0 <= dom_cls < len(_CIFAR10_CLASSES)
+            else "?"
+        )
+        print(f"{tag} Logit range (all samples+classes) : {logit_range:.4f}  std: {logit_std:.4f}")
+        print(f"{tag} Most-common argmax class           : {dom_cls} ({dom_name})")
+
+        # 1. Dead-output check
+        if logit_range < 0.01:
+            print(
+                f"{tag} [WARN] Logit range ≈ 0 → model output is nearly constant; "
+                f"SSD may have zeroed out critical weights."
+            )
+
+        # 2. Prediction-collapse check
+        if len(pred_labels_seen) == 1 and pred_labels_seen != true_labels_seen:
+            col_cls = next(iter(pred_labels_seen))
+            col_name = (
+                _CIFAR10_CLASSES[col_cls]
+                if 0 <= col_cls < len(_CIFAR10_CLASSES)
+                else "?"
+            )
+            print(
+                f"{tag} [WARN] All {samples_shown} predictions collapse to class "
+                f"{col_cls} ({col_name}) → systematic wrong prediction, NOT random forgetting."
+            )
+
+        # 3. Constant-shift check
+        unique_offsets = set(offsets)
+        if len(unique_offsets) == 1 and 0 not in unique_offsets:
+            const_shift = next(iter(unique_offsets))
+            print(
+                f"{tag} [WARN] Constant pred-true offset = {const_shift:+d} across all samples "
+                f"→ likely label-index shift bug (off-by-one, modular wrapping, or wrong dataset)."
+            )
+
+        # 4. Config-mismatch check
+        if forget_class is not None and len(true_labels_seen) == 1:
+            only_true = next(iter(true_labels_seen))
+            if only_true != forget_class:
+                print(
+                    f"{tag} [WARN] Forget-set true label ({only_true}) != args.forget_class "
+                    f"({forget_class}) → split was built for the wrong class or config is stale."
+                )
+
+    print("=" * 72)
+
+
+# ---------------------------------------------------------------------------
+
+
 def ssd(loaders: Dict[str, DataLoader], args: SSDInput):
     train_loader = loaders["train_loader"]
     train_forget_loader = loaders["train_forget_loader"]
@@ -173,6 +387,14 @@ def ssd(loaders: Dict[str, DataLoader], args: SSDInput):
     num_channels = int(next(iter(train_retain_loader))[0].shape[1])
     strategy_args = argparse.Namespace()
 
+    # ── PRE-unlearning diagnostics ────────────────────────────────────────────
+    _debug_forget_label_distribution(train_forget_loader.dataset, prefix="PRE-UNLEARN")
+    debug_forget_predictions(
+        model, train_forget_loader, device,
+        forget_class=forget_class, prefix="PRE-UNLEARN",
+    )
+    # ─────────────────────────────────────────────────────────────────────────
+
     def _run_ssd_with_config(current_model: nn.Module) -> nn.Module:
         # Keep third-party algorithm components, but inject wrapper-configured hyperparameters.
         # The vendored convenience function currently hardcodes defaults and ignores caller args.
@@ -198,10 +420,21 @@ def ssd(loaders: Dict[str, DataLoader], args: SSDInput):
         return current_model
 
     runs = int(getattr(args, "unlearn_epochs", 1))
+    selection_delta = float(getattr(args, "selection_delta", 0.0))
+    min_vr_for_selection = float(baseline_acc["vr_acc"]) - selection_delta
+    _baseline_state = {k: v.clone() for k, v in model.state_dict().items()}
+    epoch_state_snapshots = []
     epoch_metrics = []
     final_acc = dict(baseline_acc)
     for epoch in range(1, runs + 1):
         model = _run_ssd_with_config(model)
+
+        # ── POST-unlearning diagnostics (epoch {epoch}) ───────────────────────
+        debug_forget_predictions(
+            model, train_forget_loader, device,
+            forget_class=forget_class, prefix=f"POST-EPOCH-{epoch}",
+        )
+        # ─────────────────────────────────────────────────────────────────────
 
         acc_epoch = train_validation(
             model,
@@ -222,12 +455,59 @@ def ssd(loaders: Dict[str, DataLoader], args: SSDInput):
             )
         )
         epoch_metrics.append(build_epoch_record(epoch, acc_epoch))
+        epoch_state_snapshots.append(
+            {
+                "epoch": epoch,
+                "acc": dict(acc_epoch),
+                "state_dict": {
+                    name: tensor.detach().cpu().clone()
+                    for name, tensor in model.state_dict().items()
+                },
+            }
+        )
         final_acc = dict(acc_epoch)
         if args.print_accuracies:
             line = log_accuracies(args.results_path, f"epoch {epoch}", acc_epoch)
             print(f"   {line}")
 
-    acc_dict = train_validation(
+    if epoch_state_snapshots:
+        feasible_candidates = [
+            candidate
+            for candidate in epoch_state_snapshots
+            if float(candidate["acc"]["vr_acc"]) >= min_vr_for_selection
+        ]
+        used_constraint = True
+        if not feasible_candidates:
+            feasible_candidates = list(epoch_state_snapshots)
+            used_constraint = False
+            print(
+                "[SSD] No checkpoint satisfied vr_acc >= {:.4f}; "
+                "falling back to lowest vf_acc across all checkpoints.".format(min_vr_for_selection)
+            )
+
+        selected_candidate = min(
+            feasible_candidates,
+            key=lambda candidate: (
+                float(candidate["acc"]["vf_acc"]),
+                -float(candidate["acc"]["vr_acc"]),
+                int(candidate["epoch"]),
+            ),
+        )
+        selected_epoch = int(selected_candidate["epoch"])
+        selected_state_dict = selected_candidate["state_dict"]
+    else:
+        selected_epoch = None
+        selected_state_dict = {name: tensor.detach().cpu().clone() for name, tensor in model.state_dict().items()}
+        used_constraint = True
+
+    final_test_metrics = evaluate_split_metrics(model, test_loader, device, "test")
+    final_acc.update(final_test_metrics)
+
+    model.load_state_dict(selected_state_dict)
+    model = model.to(device)
+    model.eval()
+
+    selected_acc = train_validation(
         model,
         train_retain_loader,
         train_forget_loader,
@@ -235,15 +515,23 @@ def ssd(loaders: Dict[str, DataLoader], args: SSDInput):
         valid_forget_loader,
         device,
     )
-    test_metrics = evaluate_split_metrics(model, test_loader, device, "test")
-    after_test_acc = float(test_metrics["test_acc"])
-    acc_dict.update(test_metrics)
-    final_acc = dict(acc_dict)
+    selected_test_metrics = evaluate_split_metrics(model, test_loader, device, "test")
+    after_test_acc = float(selected_test_metrics["test_acc"])
+    selected_acc.update(selected_test_metrics)
+
+    report_weight_diff(_baseline_state, model.state_dict(), "SSD")
 
     if args.print_accuracies:
-        line = log_accuracies(args.results_path, "final", acc_dict)
+        line = log_accuracies(args.results_path, "final", final_acc)
         print(f"   {line}")
-        print(f"   final | test_acc: {after_test_acc:.4f}")
+        print(f"   final | test_acc: {float(final_acc['test_acc']):.4f}")
+        selected_line = log_accuracies(
+            args.results_path,
+            f"selected_epoch {selected_epoch if selected_epoch is not None else 'baseline'}",
+            selected_acc,
+        )
+        print(f"   {selected_line}")
+        print(f"   selected | test_acc: {after_test_acc:.4f}")
 
     if args.check_path is not None:
         check_dir = os.path.dirname(args.check_path)
@@ -257,6 +545,7 @@ def ssd(loaders: Dict[str, DataLoader], args: SSDInput):
         check_path=args.check_path,
         summary_path=args.summary_path,
         history_path=args.history_path,
+        run_tag=make_run_tag(seed=int(args.seed)),
     )
 
     history = {
@@ -267,9 +556,12 @@ def ssd(loaders: Dict[str, DataLoader], args: SSDInput):
         "vf_accs": [row.get("vf_acc") for row in epoch_metrics],
         "baseline_acc": baseline_acc,
         "final_acc": final_acc,
-        "selected_acc": final_acc,
-        "best_epoch": epoch_metrics[-1]["epoch"] if epoch_metrics else None,
-        "selection_strategy": "last_epoch",
+        "selected_acc": selected_acc,
+        "best_epoch": selected_epoch,
+        "selection_strategy": "min_vf_subject_to_vr_floor",
+        "selection_vr_floor": min_vr_for_selection,
+        "selection_delta": selection_delta,
+        "selection_constraint_satisfied": used_constraint,
         "test_acc": after_test_acc,
         "forget_class": forget_class,
         "summary_path": summary_path,
@@ -280,18 +572,12 @@ def ssd(loaders: Dict[str, DataLoader], args: SSDInput):
         method="ssd",
         baseline_metrics=baseline_acc,
         final_metrics=final_acc,
-        selected_metrics=final_acc,
+        selected_metrics=selected_acc,
         selected_epoch=history["best_epoch"],
-        selection_strategy="last_epoch",
+        selection_strategy="min_vf_subject_to_vr_floor",
         history_rows=epoch_metrics,
         loaders=loaders,
-        run_config={
-            "dataset": args.dataset,
-            "seed": int(args.seed),
-            "split_protocol": str(args.split_protocol),
-            "forget_fraction": float(args.forget_fraction),
-            "batch_size": int(args.batch_size),
-        },
+        run_config=to_serializable_dict(args),
         artifacts={
             "checkpoint_path": args.check_path,
             "results_path": args.results_path,
@@ -303,6 +589,9 @@ def ssd(loaders: Dict[str, DataLoader], args: SSDInput):
             "unlearn_epochs": runs,
             "dampening_constant": float(getattr(args, "dampening_constant", 1.0)),
             "selection_weighting": float(getattr(args, "selection_weighting", 10.0)),
+            "selection_delta": selection_delta,
+            "selection_vr_floor": min_vr_for_selection,
+            "selection_constraint_satisfied": used_constraint,
         },
     )
     save_unlearning_summary(summary_path, summary)
@@ -486,6 +775,12 @@ def main():
         default=None,
         help="Compatibility override; third-party strategy currently uses its own defaults.",
     )
+    parser.add_argument(
+        "--selection-delta",
+        type=float,
+        default=None,
+        help="Selection rule delta: choose lowest vf_acc subject to vr_acc >= baseline_vr_acc - delta.",
+    )
 
     cli_args = parser.parse_args()
     args = _load_config(cli_args.config)
@@ -499,6 +794,8 @@ def main():
         overrides["lower_bound"] = cli_args.lower_bound
     if cli_args.exponent is not None:
         overrides["exponent"] = cli_args.exponent
+    if cli_args.selection_delta is not None:
+        overrides["selection_delta"] = cli_args.selection_delta
     if overrides:
         args = replace(args, **overrides)
 

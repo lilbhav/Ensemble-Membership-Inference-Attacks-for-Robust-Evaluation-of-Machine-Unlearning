@@ -13,6 +13,8 @@ Usage:
 import os
 import sys
 import yaml
+import json
+import csv
 import logging
 import argparse
 import random
@@ -609,6 +611,7 @@ def run_mia_experiment(config_path: str,
     logger.info(f"Total samples in ground truth: {len(ground_truth)}")
     
     metrics = runner.evaluate_attacks(ground_truth)
+    ensemble_metrics: Dict[str, Dict[str, float]] = {}
     
     logger.info("\nAttack Performance:")
     for attack_name, attack_metrics in metrics.items():
@@ -654,6 +657,7 @@ def run_mia_experiment(config_path: str,
             member_indices=np.arange(num_members),
         )
         union_metrics = union_result.compute_metrics(ground_truth)
+        ensemble_metrics["union"] = dict(union_metrics)
         
         logger.info("\nUnion (OR) Ensemble:")
         for metric_name, metric_value in union_metrics.items():
@@ -671,10 +675,66 @@ def run_mia_experiment(config_path: str,
             member_indices=np.arange(num_members),
         )
         voting_metrics = voting_result.compute_metrics(ground_truth)
+        ensemble_metrics["voting"] = dict(voting_metrics)
         
         logger.info("\nVoting (k=2) Ensemble:")
         for metric_name, metric_value in voting_metrics.items():
             logger.info(f"  {metric_name}: {metric_value:.4f}")
+
+    # Save structured summary artifacts for downstream aggregation.
+    attack_rows = []
+    for attack_name, attack_metric_values in metrics.items():
+        row = {"attack": attack_name}
+        row.update({metric_name: float(metric_value) for metric_name, metric_value in attack_metric_values.items()})
+        attack_rows.append(row)
+    for attack_name, attack_metric_values in ensemble_metrics.items():
+        row = {"attack": attack_name}
+        row.update({metric_name: float(metric_value) for metric_name, metric_value in attack_metric_values.items()})
+        attack_rows.append(row)
+
+    summary_payload = {
+        "schema_version": 1,
+        "experiment_name": experiment_name,
+        "seed": int(seed),
+        "evaluation_target": evaluation_target,
+        "member_set_name": member_name,
+        "nonmember_set_name": nonmember_name,
+        "member_count": int(num_members),
+        "nonmember_count": int(num_nonmembers),
+        "attacks": [
+            {
+                "name": attack_cfg.name,
+                "model_access": attack_cfg.model_access,
+                "params": dict(attack_cfg.params),
+            }
+            for attack_cfg in attack_configs
+        ],
+        "metrics": {attack_name: dict(attack_values) for attack_name, attack_values in metrics.items()},
+        "ensemble_metrics": ensemble_metrics,
+        "config": config,
+    }
+
+    summary_json_path = os.path.join(output_path, "evaluation_summary.json")
+    with open(summary_json_path, "w", encoding="utf-8") as handle:
+        json.dump(summary_payload, handle, indent=2)
+
+    summary_csv_path = os.path.join(output_path, "evaluation_summary.csv")
+    csv_fieldnames = [
+        "attack",
+        "auc",
+        "accuracy",
+        "tpr_at_fpr_0.01",
+        "tpr_at_fpr_0.001",
+        "min_nonzero_fpr",
+    ]
+    with open(summary_csv_path, "w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=csv_fieldnames)
+        writer.writeheader()
+        for row in attack_rows:
+            writer.writerow({field: row.get(field) for field in csv_fieldnames})
+
+    logger.info(f"Structured summary JSON saved to: {summary_json_path}")
+    logger.info(f"Structured summary CSV saved to: {summary_csv_path}")
     
     logger.info("\n" + "="*80)
     logger.info("EXPERIMENT COMPLETE")

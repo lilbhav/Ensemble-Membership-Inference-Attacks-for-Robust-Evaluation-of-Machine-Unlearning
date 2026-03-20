@@ -169,3 +169,65 @@ def log_accuracies(log_path: str, label: str, acc_dict: dict) -> str:
             f.write(line + "\n")
 
     return line
+
+
+def report_weight_diff(
+    baseline_state: dict,
+    unlearned_state: dict,
+    method_name: str = "unlearning",
+    tol: float = 1e-6,
+) -> None:
+    """Print per-layer L2 parameter difference norms between baseline and unlearned models.
+
+    Raises RuntimeError if the unlearned model is identical or nearly identical to the
+    baseline checkpoint (total L2 diff < tol), which indicates that unlearning had no effect.
+    """
+    layer_diffs = {}
+    for name in baseline_state:
+        if name not in unlearned_state:
+            continue
+        diff = (unlearned_state[name].float() - baseline_state[name].float()).norm().item()
+        layer_diffs[name] = diff
+
+    if not layer_diffs:
+        raise RuntimeError(
+            f"[{method_name}] Cannot compare weights: no matching parameter names found "
+            "between baseline and unlearned state dicts."
+        )
+
+    max_name_len = max(len(n) for n in layer_diffs)
+    sep = "=" * (max_name_len + 28)
+    print(f"\n{sep}")
+    print(f"[{method_name}] Per-layer weight change (L2 norm of parameter diff)")
+    print(sep)
+    for name, diff in layer_diffs.items():
+        marker = "  <-- UNCHANGED" if diff < tol else ""
+        print(f"  {name:<{max_name_len}}  {diff:.6e}{marker}")
+    total_diff = sum(layer_diffs.values())
+    unchanged_layers = [n for n, d in layer_diffs.items() if d < tol]
+    print(sep)
+    print(f"  Total L2 diff across all layers : {total_diff:.6e}")
+    print(f"  Layers with zero change         : {len(unchanged_layers)} / {len(layer_diffs)}")
+    print(f"{sep}\n")
+
+    if len(unchanged_layers) == len(layer_diffs):
+        raise RuntimeError(
+            f"[{method_name}] Unlearning produced NO weight changes — the unlearned model is "
+            "identical to the baseline checkpoint. Verify that the unlearning strategy is "
+            "actually modifying model parameters and that data loaders are non-empty."
+        )
+
+    if total_diff < tol:
+        raise RuntimeError(
+            f"[{method_name}] Total weight change ({total_diff:.2e}) is below tolerance "
+            f"({tol:.2e}). The unlearned model is effectively identical to the baseline. "
+            "Check unlearning configuration and that forget/retain loaders have data."
+        )
+
+    if unchanged_layers:
+        sample = ", ".join(unchanged_layers[:5])
+        ellipsis = "..." if len(unchanged_layers) > 5 else ""
+        print(
+            f"[{method_name}] WARNING: {len(unchanged_layers)} layer(s) had no weight change: "
+            f"{sample}{ellipsis}"
+        )

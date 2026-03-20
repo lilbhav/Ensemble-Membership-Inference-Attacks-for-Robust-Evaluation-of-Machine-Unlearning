@@ -27,7 +27,7 @@ if TP_MACHINEUNLEARNING_ROOT not in sys.path:
     sys.path.insert(0, TP_MACHINEUNLEARNING_ROOT)
 
 from data.loaders import load_dataset, get_num_classes
-from utils.metrics import evaluate_split_metrics, log_accuracies
+from utils.metrics import evaluate_split_metrics, log_accuracies, report_weight_diff
 from utils.splits import (
     ensure_retain_forget_split,
     ensure_targeted_random_unlearning_split,
@@ -37,9 +37,11 @@ from utils.transfer_setup import ensure_cifar10_from_cifar100_transfer_checkpoin
 from utils.unlearning_results import (
     build_epoch_record,
     build_unlearning_summary,
+    make_run_tag,
     resolve_unlearning_artifact_paths,
     save_unlearning_history_csv,
     save_unlearning_summary,
+    to_serializable_dict,
 )
 try:
     from Third_Party_Code.MachineUnlearning.unlearn_strategies import strategies as third_party_strategies
@@ -203,6 +205,7 @@ def bad_teacher(loaders: Dict[str, DataLoader], args: BadTeacherInput):
         dataset=list(loaders["train_retain_loader"].dataset)
     )
 
+    _baseline_state = {k: v.clone() for k, v in model.state_dict().items()}
     epoch_list = []
     tr_accs = []
     tf_accs = []
@@ -251,6 +254,8 @@ def bad_teacher(loaders: Dict[str, DataLoader], args: BadTeacherInput):
             line = log_accuracies(args.results_path, f"epoch {epoch}", acc_dict)
             print(f"   {line}")
 
+    report_weight_diff(_baseline_state, model.state_dict(), "BadTeacher")
+
     model.eval()
     test_metrics = evaluate_split_metrics(model, loaders["test_loader"], device, "test")
     test_acc = float(test_metrics["test_acc"])
@@ -273,6 +278,7 @@ def bad_teacher(loaders: Dict[str, DataLoader], args: BadTeacherInput):
         check_path=args.check_path,
         summary_path=args.summary_path,
         history_path=args.history_path,
+        run_tag=make_run_tag(seed=int(args.seed)),
     )
 
     history = {
@@ -300,13 +306,7 @@ def bad_teacher(loaders: Dict[str, DataLoader], args: BadTeacherInput):
         selection_strategy="last_epoch",
         history_rows=epoch_metrics,
         loaders=loaders,
-        run_config={
-            "dataset": args.dataset,
-            "seed": int(args.seed),
-            "split_protocol": str(args.split_protocol),
-            "forget_fraction": float(args.forget_fraction),
-            "batch_size": int(args.batch_size),
-        },
+        run_config=to_serializable_dict(args),
         artifacts={
             "checkpoint_path": args.check_path,
             "results_path": args.results_path,

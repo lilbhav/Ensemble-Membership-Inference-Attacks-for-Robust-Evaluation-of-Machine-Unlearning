@@ -61,10 +61,15 @@ METHOD_ALIASES = {
     "scrub_unlearned_model": "scrub",
     "ssd_unlearned_model": "ssd",
 }
+EXCLUDED_METHODS = {"finetune", "fine_tune", "finetuning"}
 
 
 def _method_name(path_name: str) -> str:
     return METHOD_ALIASES.get(path_name, path_name)
+
+
+def _is_excluded_method(method: str) -> bool:
+    return method.strip().lower() in EXCLUDED_METHODS
 
 
 def _extract_last_float(text: str, pattern: str) -> Optional[float]:
@@ -398,6 +403,8 @@ def _collect_unlearning_records(unlearning_dir: Path) -> List[Dict[str, object]]
 
     for results_txt in sorted(unlearning_dir.glob("*_results.txt")):
         method = results_txt.name[: -len("_results.txt")]
+        if _is_excluded_method(method):
+            continue
         text_payload = _parse_unlearning_results_txt(results_txt)
         baseline = dict(text_payload.get("baseline", {}))
         selected = dict(text_payload.get("selected", {}))
@@ -460,233 +467,325 @@ def _collect_unlearning_records(unlearning_dir: Path) -> List[Dict[str, object]]
     return records
 
 
+def _configure_plot_style() -> None:
+    plt.style.use("seaborn-v0_8-whitegrid")
+    plt.rcParams.update(
+        {
+            "figure.facecolor": "#f7f9fb",
+            "axes.facecolor": "#ffffff",
+            "axes.edgecolor": "#d5dde5",
+            "axes.grid": True,
+            "grid.color": "#dbe4ee",
+            "grid.alpha": 0.8,
+            "grid.linestyle": "-",
+            "axes.titleweight": "bold",
+            "axes.labelweight": "semibold",
+            "font.size": 10,
+            "axes.titlesize": 12,
+            "axes.labelsize": 10,
+            "xtick.labelsize": 9,
+            "ytick.labelsize": 9,
+            "legend.frameon": False,
+        }
+    )
+
+
+def _clip01(value: Optional[float]) -> Optional[float]:
+    if value is None:
+        return None
+    return max(0.0, min(1.0, float(value)))
+
+
+def _safe_ratio(numerator: Optional[float], denominator: Optional[float]) -> Optional[float]:
+    if numerator is None or denominator is None or denominator == 0:
+        return None
+    return float(numerator) / float(denominator)
+
+
+def _build_unlearning_method_table(records: List[Dict[str, object]]) -> List[Dict[str, Optional[float]]]:
+    table: List[Dict[str, Optional[float]]] = []
+
+    for row in records:
+        method = str(row.get("method"))
+        baseline = row.get("baseline", {})
+        selected = row.get("selected", {})
+        if not isinstance(baseline, dict):
+            baseline = {}
+        if not isinstance(selected, dict):
+            selected = {}
+
+        baseline_tf = _to_float(baseline.get("tf_acc"))
+        baseline_vr = _to_float(baseline.get("vr_acc"))
+        baseline_test = _to_float(baseline.get("test_acc"))
+
+        selected_tf = _to_float(selected.get("tf_acc"))
+        selected_vr = _to_float(selected.get("vr_acc"))
+        selected_test = _to_float(selected.get("test_acc"))
+
+        forget_reduction = None
+        if baseline_tf is not None and selected_tf is not None:
+            forget_reduction = baseline_tf - selected_tf
+
+        retain_drop = None
+        if baseline_vr is not None and selected_vr is not None:
+            retain_drop = baseline_vr - selected_vr
+
+        test_drop = None
+        if baseline_test is not None and selected_test is not None:
+            test_drop = baseline_test - selected_test
+
+        forget_effectiveness = _clip01(_safe_ratio(forget_reduction, baseline_tf))
+        retain_preservation = _clip01(_safe_ratio(selected_vr, baseline_vr))
+        test_preservation = _clip01(_safe_ratio(selected_test, baseline_test))
+
+        balanced_score = None
+        score_parts = [value for value in (forget_effectiveness, retain_preservation, test_preservation) if value is not None]
+        if score_parts:
+            balanced_score = float(sum(score_parts) / len(score_parts))
+
+        table.append(
+            {
+                "method": method,
+                "baseline_tf_acc": baseline_tf,
+                "baseline_vr_acc": baseline_vr,
+                "baseline_test_acc": baseline_test,
+                "selected_tf_acc": selected_tf,
+                "selected_vr_acc": selected_vr,
+                "selected_test_acc": selected_test,
+                "forget_reduction": forget_reduction,
+                "retain_drop": retain_drop,
+                "test_drop": test_drop,
+                "forget_effectiveness": forget_effectiveness,
+                "retain_preservation": retain_preservation,
+                "test_preservation": test_preservation,
+                "balanced_score": balanced_score,
+            }
+        )
+
+    return table
+
+
 def _plot_unlearning_selected_metrics(records: List[Dict[str, object]], out_dir: Path, dpi: int) -> Optional[Path]:
-    if not records:
+    table = _build_unlearning_method_table(records)
+    if not table:
         return None
 
-    methods = [str(row["method"]) for row in records]
+    methods = [str(row["method"]) for row in table]
     metric_specs = [
-        ("vr_acc", "selected vr_acc"),
-        ("tf_acc", "selected tf_acc"),
-        ("vf_acc", "selected vf_acc"),
-        ("test_acc", "selected test_acc"),
+        ("tf_acc", "Forget Acc (lower better)", "#d1495b"),
+        ("vr_acc", "Retain Acc", "#2c7fb8"),
+        ("test_acc", "Test Acc", "#1b9e77"),
     ]
-    width = 0.2
+
+    fig, axes = plt.subplots(1, 3, figsize=(16, 5), sharey=True)
     x = list(range(len(methods)))
+    width = 0.38
 
-    fig, ax = plt.subplots(figsize=(12, 6))
-    for idx, (key, label) in enumerate(metric_specs):
-        values: List[float] = []
+    for axis, (metric_key, title, color) in zip(axes, metric_specs):
+        baseline_values: List[float] = []
+        selected_values: List[float] = []
         for row in records:
+            baseline = row.get("baseline", {})
             selected = row.get("selected", {})
-            if not isinstance(selected, dict):
-                values.append(float("nan"))
-                continue
-            value = _to_float(selected.get(key))
-            values.append(float("nan") if value is None else value)
+            baseline_value = _to_float(baseline.get(metric_key)) if isinstance(baseline, dict) else None
+            selected_value = _to_float(selected.get(metric_key)) if isinstance(selected, dict) else None
+            baseline_values.append(float("nan") if baseline_value is None else baseline_value)
+            selected_values.append(float("nan") if selected_value is None else selected_value)
 
-        offset = [(pos + (idx - 1.5) * width) for pos in x]
-        ax.bar(offset, values, width=width, label=label)
+        axis.bar([p - width / 2 for p in x], baseline_values, width=width, label="baseline", color="#dce6f2")
+        axis.bar([p + width / 2 for p in x], selected_values, width=width, label="selected", color=color)
+        axis.set_xticks(x)
+        axis.set_xticklabels(methods, rotation=20, ha="right")
+        axis.set_ylim(0.0, 1.02)
+        axis.set_title(title)
+        axis.grid(axis="y")
 
-    ax.set_xticks(x)
-    ax.set_xticklabels(methods, rotation=20, ha="right")
-    ax.set_ylim(0, 1.0)
-    ax.set_ylabel("Accuracy")
-    ax.set_title("Unlearning Results: Selected Metrics by Method")
-    ax.legend()
-    ax.grid(axis="y", alpha=0.25)
+    axes[0].set_ylabel("Accuracy")
+    handles, labels = axes[0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc="upper center", ncol=2)
+    fig.suptitle("Baseline vs Selected Performance", y=1.03)
     fig.tight_layout()
 
     out_path = out_dir / "unlearning_selected_metrics_bar.png"
-    fig.savefig(out_path, dpi=dpi)
+    fig.savefig(out_path, dpi=dpi, bbox_inches="tight")
     plt.close(fig)
     return out_path
 
 
 def _plot_unlearning_delta_heatmap(records: List[Dict[str, object]], out_dir: Path, dpi: int) -> Optional[Path]:
-    if not records:
+    table = _build_unlearning_method_table(records)
+    if not table:
         return None
 
-    metric_order = ["tr_acc", "tf_acc", "vr_acc", "vf_acc", "test_acc"]
-    methods = [str(row["method"]) for row in records]
+    metric_order = [
+        ("forget_effectiveness", "Forget efficacy"),
+        ("retain_preservation", "Retain preservation"),
+        ("test_preservation", "Test preservation"),
+        ("balanced_score", "Balanced score"),
+    ]
+    methods = [str(row["method"]) for row in table]
 
     matrix: List[List[float]] = []
-    for row in records:
-        baseline = row.get("baseline", {})
-        selected = row.get("selected", {})
-        if not isinstance(baseline, dict) or not isinstance(selected, dict):
-            continue
-
+    for row in table:
         values: List[float] = []
-        for key in metric_order:
-            b_value = _to_float(baseline.get(key))
-            s_value = _to_float(selected.get(key))
-            if b_value is None or s_value is None:
-                values.append(float("nan"))
-            else:
-                values.append(s_value - b_value)
+        for key, _ in metric_order:
+            value = _to_float(row.get(key))
+            values.append(float("nan") if value is None else value)
         matrix.append(values)
 
-    if not matrix:
-        return None
-
-    fig, ax = plt.subplots(figsize=(10, 6))
-    image = ax.imshow(matrix, aspect="auto", cmap="RdYlGn")
+    fig, ax = plt.subplots(figsize=(9, 5.5))
+    image = ax.imshow(matrix, aspect="auto", cmap="YlGnBu", vmin=0.0, vmax=1.0)
     cbar = fig.colorbar(image, ax=ax)
-    cbar.set_label("selected - baseline")
+    cbar.set_label("Normalized score (higher is better)")
 
     ax.set_xticks(range(len(metric_order)))
-    ax.set_xticklabels(metric_order, rotation=25, ha="right")
+    ax.set_xticklabels([label for _, label in metric_order], rotation=20, ha="right")
     ax.set_yticks(range(len(methods)))
     ax.set_yticklabels(methods)
-    ax.set_title("Unlearning Metric Deltas from Baseline")
+    ax.set_title("Method Quality Heatmap (Derived Metrics)")
 
     for i, row_values in enumerate(matrix):
         for j, value in enumerate(row_values):
             if value == value:
-                ax.text(j, i, f"{value:+.3f}", ha="center", va="center", fontsize=8)
+                ax.text(j, i, f"{value:.2f}", ha="center", va="center", fontsize=8, color="#0f172a")
 
     fig.tight_layout()
     out_path = out_dir / "unlearning_delta_heatmap.png"
-    fig.savefig(out_path, dpi=dpi)
+    fig.savefig(out_path, dpi=dpi, bbox_inches="tight")
     plt.close(fig)
     return out_path
 
 
 def _plot_unlearning_forget_retain_scatter(records: List[Dict[str, object]], out_dir: Path, dpi: int) -> Optional[Path]:
-    points: List[Tuple[str, float, float]] = []
-    for row in records:
-        selected = row.get("selected", {})
-        if not isinstance(selected, dict):
+    table = _build_unlearning_method_table(records)
+    points: List[Tuple[str, float, float, float, float]] = []
+    for row in table:
+        retain_preservation = _to_float(row.get("retain_preservation"))
+        forget_effectiveness = _to_float(row.get("forget_effectiveness"))
+        balanced_score = _to_float(row.get("balanced_score"))
+        test_preservation = _to_float(row.get("test_preservation"))
+        if retain_preservation is None or forget_effectiveness is None:
             continue
-        vr_acc = _to_float(selected.get("vr_acc"))
-        tf_acc = _to_float(selected.get("tf_acc"))
-        if vr_acc is None or tf_acc is None:
-            continue
-        points.append((str(row["method"]), vr_acc, tf_acc))
+        points.append(
+            (
+                str(row.get("method")),
+                retain_preservation,
+                forget_effectiveness,
+                0.0 if balanced_score is None else balanced_score,
+                0.0 if test_preservation is None else test_preservation,
+            )
+        )
 
     if not points:
         return None
 
-    fig, ax = plt.subplots(figsize=(8, 6))
-    for method, vr_acc, tf_acc in points:
-        ax.scatter([vr_acc], [tf_acc], s=90)
-        ax.annotate(method, (vr_acc, tf_acc), textcoords="offset points", xytext=(5, 5))
+    fig, ax = plt.subplots(figsize=(8.5, 6.5))
 
-    ax.set_xlim(0, 1.0)
-    ax.set_ylim(0, 1.0)
-    ax.set_xlabel("Retain utility (selected vr_acc)")
-    ax.set_ylabel("Forget retention (selected tf_acc, lower is better)")
-    ax.set_title("Unlearning Tradeoff: Retain vs Forget Accuracy")
-    ax.grid(alpha=0.3)
+    ax.axvline(0.9, color="#94a3b8", linestyle="--", linewidth=1.2)
+    ax.axhline(0.9, color="#94a3b8", linestyle="--", linewidth=1.2)
+
+    for method, retain, forget, score, test_pres in points:
+        marker_size = 120 + 220 * max(0.0, min(1.0, test_pres))
+        color = "#1d4ed8" if score >= 0.85 else "#0f766e" if score >= 0.7 else "#b45309"
+        ax.scatter([retain], [forget], s=marker_size, c=color, alpha=0.78, edgecolors="white", linewidths=1.2)
+        ax.annotate(f"{method}\nscore={score:.2f}", (retain, forget), textcoords="offset points", xytext=(6, 6), fontsize=8)
+
+    ax.set_xlim(0.0, 1.02)
+    ax.set_ylim(0.0, 1.02)
+    ax.set_xlabel("Retain preservation = selected_vr / baseline_vr")
+    ax.set_ylabel("Forget efficacy = (baseline_tf - selected_tf) / baseline_tf")
+    ax.set_title("Unlearning Tradeoff Map (bubble size = test preservation)")
+    ax.grid(alpha=0.35)
     fig.tight_layout()
 
     out_path = out_dir / "unlearning_forget_retain_scatter.png"
-    fig.savefig(out_path, dpi=dpi)
+    fig.savefig(out_path, dpi=dpi, bbox_inches="tight")
     plt.close(fig)
     return out_path
 
 
 def _plot_unlearning_history(records: List[Dict[str, object]], out_dir: Path, dpi: int) -> Optional[Path]:
-    metric_order = ["tr_acc", "tf_acc", "vr_acc", "vf_acc"]
+    fig, axes = plt.subplots(1, 2, figsize=(14, 5), sharex=False, sharey=True)
     plotted_methods: Set[str] = set()
-
-    fig, axes = plt.subplots(2, 2, figsize=(12, 8), sharex=False, sharey=True)
-    axes_flat = axes.flatten()
 
     for record in records:
         history = record.get("history", [])
         if not isinstance(history, list) or not history:
             continue
 
-        method = str(record["method"])
+        method = str(record.get("method"))
         x_values = [int(_to_float(item.get("step")) or idx + 1) for idx, item in enumerate(history)]
+        tf_values = [float("nan") if _to_float(item.get("tf_acc")) is None else float(_to_float(item.get("tf_acc"))) for item in history]
+        vr_values = [float("nan") if _to_float(item.get("vr_acc")) is None else float(_to_float(item.get("vr_acc"))) for item in history]
 
-        for axis, metric in zip(axes_flat, metric_order):
-            y_values = [_to_float(item.get(metric)) for item in history]
-            if not any(v is not None for v in y_values):
-                continue
-            axis.plot(
-                x_values,
-                [float("nan") if value is None else value for value in y_values],
-                marker="o",
-                linewidth=1.6,
-                label=method,
-            )
-            axis.set_title(metric)
-            axis.set_ylim(0, 1.0)
-            axis.grid(alpha=0.25)
+        if any(value == value for value in tf_values):
+            axes[0].plot(x_values, tf_values, marker="o", linewidth=1.8, label=method)
             plotted_methods.add(method)
+        if any(value == value for value in vr_values):
+            axes[1].plot(x_values, vr_values, marker="o", linewidth=1.8, label=method)
 
     if not plotted_methods:
         plt.close(fig)
         return None
 
-    for axis in axes_flat:
+    axes[0].set_title("Forget Accuracy Over Steps (lower is better)")
+    axes[1].set_title("Retain Accuracy Over Steps")
+    for axis in axes:
         axis.set_xlabel("Step")
-        axis.set_ylabel("Accuracy")
+        axis.set_ylim(0.0, 1.02)
+        axis.grid(alpha=0.3)
+    axes[0].set_ylabel("Accuracy")
 
-    handles, labels = axes_flat[0].get_legend_handles_labels()
+    handles, labels = axes[0].get_legend_handles_labels()
     if handles:
         fig.legend(handles, labels, loc="upper center", ncol=min(5, len(labels)))
 
-    fig.suptitle("Unlearning Metric Trajectories from History Files", y=1.02)
+    fig.suptitle("Unlearning Trajectory Focus View", y=1.04)
     fig.tight_layout()
 
     out_path = out_dir / "unlearning_history_lines.png"
-    fig.savefig(out_path, dpi=dpi)
+    fig.savefig(out_path, dpi=dpi, bbox_inches="tight")
     plt.close(fig)
     return out_path
 
 
 def _plot_unlearning_prf_macro(records: List[Dict[str, object]], out_dir: Path, dpi: int) -> Optional[Path]:
-    if not records:
+    table = _build_unlearning_method_table(records)
+    if not table:
         return None
 
-    methods = [str(row["method"]) for row in records]
-    retain_specs = [
-        ("vr_precision_macro", "retain precision"),
-        ("vr_recall_macro", "retain recall"),
-        ("vr_f1_macro", "retain f1"),
-    ]
-    forget_specs = [
-        ("vf_precision_macro", "forget precision"),
-        ("vf_recall_macro", "forget recall"),
-        ("vf_f1_macro", "forget f1"),
-    ]
+    ranked = sorted(table, key=lambda row: -1.0 if row.get("balanced_score") is None else float(row.get("balanced_score")))
+    methods = [str(row["method"]) for row in ranked]
+    scores = [float("nan") if row.get("balanced_score") is None else float(row.get("balanced_score")) for row in ranked]
+    retain = [float("nan") if row.get("retain_preservation") is None else float(row.get("retain_preservation")) for row in ranked]
+    forget = [float("nan") if row.get("forget_effectiveness") is None else float(row.get("forget_effectiveness")) for row in ranked]
 
+    y = list(range(len(methods)))
     fig, axes = plt.subplots(1, 2, figsize=(14, 6), sharey=True)
-    x = list(range(len(methods)))
-    width = 0.25
 
-    for axis, specs, title in (
-        (axes[0], retain_specs, "Selected Retain Macro PRF"),
-        (axes[1], forget_specs, "Selected Forget Macro PRF"),
-    ):
-        for idx, (key, label) in enumerate(specs):
-            values: List[float] = []
-            for row in records:
-                selected = row.get("selected", {})
-                value = _to_float(selected.get(key)) if isinstance(selected, dict) else None
-                values.append(float("nan") if value is None else value)
+    axes[0].barh(y, scores, color="#1d4ed8", alpha=0.9)
+    axes[0].set_xlim(0.0, 1.0)
+    axes[0].set_yticks(y)
+    axes[0].set_yticklabels(methods)
+    axes[0].invert_yaxis()
+    axes[0].set_title("Balanced Unlearning Score")
+    axes[0].set_xlabel("Score")
 
-            offset = [pos + (idx - 1.0) * width for pos in x]
-            axis.bar(offset, values, width=width, label=label)
+    axes[1].barh([v + 0.18 for v in y], retain, height=0.34, color="#0f766e", label="retain preservation")
+    axes[1].barh([v - 0.18 for v in y], forget, height=0.34, color="#b45309", label="forget efficacy")
+    axes[1].set_xlim(0.0, 1.0)
+    axes[1].set_yticks(y)
+    axes[1].set_yticklabels(methods)
+    axes[1].invert_yaxis()
+    axes[1].set_title("Score Components")
+    axes[1].set_xlabel("Normalized component")
+    axes[1].legend(loc="lower right")
 
-        axis.set_xticks(x)
-        axis.set_xticklabels(methods, rotation=20, ha="right")
-        axis.set_ylim(0, 1.0)
-        axis.set_title(title)
-        axis.grid(axis="y", alpha=0.25)
-
-    axes[0].set_ylabel("Score")
-    axes[0].legend()
-    axes[1].legend()
-    fig.suptitle("Unlearning Precision/Recall/F1 Comparison (Macro)")
+    fig.suptitle("Unlearning Leaderboard", y=1.02)
     fig.tight_layout()
 
     out_path = out_dir / "unlearning_prf_macro_bar.png"
-    fig.savefig(out_path, dpi=dpi)
+    fig.savefig(out_path, dpi=dpi, bbox_inches="tight")
     plt.close(fig)
     return out_path
 
@@ -694,6 +793,10 @@ def _plot_unlearning_prf_macro(records: List[Dict[str, object]], out_dir: Path, 
 def write_unlearning_summary_csv(records: List[Dict[str, object]], out_dir: Path) -> Optional[Path]:
     if not records:
         return None
+
+    derived_by_method: Dict[str, Dict[str, Optional[float]]] = {
+        str(item.get("method")): item for item in _build_unlearning_method_table(records)
+    }
 
     out_path = out_dir / "unlearning_plot_data_summary.csv"
     fieldnames = [
@@ -724,6 +827,14 @@ def write_unlearning_summary_csv(records: List[Dict[str, object]], out_dir: Path
         "selected_vf_f1_macro",
         "selected_test_f1_macro",
         "selected_test_f1_weighted",
+        "baseline_test_acc",
+        "forget_reduction",
+        "retain_drop",
+        "test_drop",
+        "forget_effectiveness",
+        "retain_preservation",
+        "test_preservation",
+        "balanced_score",
         "history_points",
     ]
 
@@ -779,6 +890,20 @@ def write_unlearning_summary_csv(records: List[Dict[str, object]], out_dir: Path
                     "selected_vf_f1_macro": _to_float(selected.get("vf_f1_macro")),
                     "selected_test_f1_macro": _to_float(selected.get("test_f1_macro")),
                     "selected_test_f1_weighted": _to_float(selected.get("test_f1_weighted")),
+                    "baseline_test_acc": _to_float(baseline.get("test_acc")),
+                    "forget_reduction": _to_float(derived_by_method.get(str(record.get("method")), {}).get("forget_reduction")),
+                    "retain_drop": _to_float(derived_by_method.get(str(record.get("method")), {}).get("retain_drop")),
+                    "test_drop": _to_float(derived_by_method.get(str(record.get("method")), {}).get("test_drop")),
+                    "forget_effectiveness": _to_float(
+                        derived_by_method.get(str(record.get("method")), {}).get("forget_effectiveness")
+                    ),
+                    "retain_preservation": _to_float(
+                        derived_by_method.get(str(record.get("method")), {}).get("retain_preservation")
+                    ),
+                    "test_preservation": _to_float(
+                        derived_by_method.get(str(record.get("method")), {}).get("test_preservation")
+                    ),
+                    "balanced_score": _to_float(derived_by_method.get(str(record.get("method")), {}).get("balanced_score")),
                     "history_points": len(history),
                 }
             )
@@ -1009,6 +1134,8 @@ def build_records(results_dir: Path) -> Tuple[List[Dict[str, object]], List[Dict
             continue
 
         method = _method_name(method_dir.name)
+        if _is_excluded_method(method):
+            continue
         summary_path = discover_unlearning_summary(method_dir)
         results_txt = method_dir / "results.txt"
         if summary_path is not None:
@@ -1093,51 +1220,53 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
 
-    if not args.results_dir.exists():
-        raise FileNotFoundError(f"results directory not found: {args.results_dir}")
+    if not args.unlearning_dir.exists():
+        raise FileNotFoundError(f"unlearning results directory not found: {args.unlearning_dir}")
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
-
-    utility_rows, attack_rows = build_records(args.results_dir)
-
-    max_auc_by_method: Dict[str, float] = {}
-    for row in attack_rows:
-        method = str(row["method"])
-        auc = row.get("auc")
-        if auc is None:
-            continue
-        auc_value = float(auc)
-        max_auc_by_method[method] = max(max_auc_by_method.get(method, 0.0), auc_value)
-
-    attack_stats_by_method = compute_method_attack_stats(attack_rows)
+    _configure_plot_style()
 
     generated_paths: List[Path] = []
 
+    unlearning_records = _collect_unlearning_records(args.unlearning_dir)
+
+    # Build method-level utility rows only from unlearning summaries/history artifacts.
+    utility_rows: List[Dict[str, object]] = []
+    for record in unlearning_records:
+        baseline = record.get("baseline", {})
+        selected = record.get("selected", {})
+        if not isinstance(baseline, dict):
+            baseline = {}
+        if not isinstance(selected, dict):
+            selected = {}
+
+        utility_rows.append(
+            {
+                "method": str(record.get("method")),
+                "tr_acc": _to_float(selected.get("tr_acc")),
+                "tf_acc": _to_float(selected.get("tf_acc")),
+                "vr_acc": _to_float(selected.get("vr_acc")),
+                "vf_acc": _to_float(selected.get("vf_acc")),
+                "baseline_tf_acc": _to_float(baseline.get("tf_acc")),
+                "baseline_vr_acc": _to_float(baseline.get("vr_acc")),
+            }
+        )
+
     for generated in (
         _plot_utility_bars(utility_rows, args.out_dir, args.dpi),
-        _plot_attack_auc_bars(attack_rows, args.out_dir, args.dpi),
-        _plot_privacy_utility_scatter(utility_rows, max_auc_by_method, args.out_dir, args.dpi),
     ):
         if generated is not None:
             generated_paths.append(generated)
 
-    sweep_csv = args.sweep_csv if args.sweep_csv is not None else discover_sweep_csv(args.results_dir)
-    if sweep_csv is not None and sweep_csv.exists():
-        sweep_rows = read_sweep_csv(sweep_csv)
-        heatmap = _plot_ssd_heatmap(sweep_rows, args.out_dir, args.dpi)
-        if heatmap is not None:
-            generated_paths.append(heatmap)
-
     summary_csv = write_summary_csv(
         utility_rows,
-        max_auc_by_method,
-        attack_stats_by_method,
+        {},
+        {},
         args.privacy_lambda,
         args.out_dir,
     )
     generated_paths.append(summary_csv)
 
-    unlearning_records = _collect_unlearning_records(args.unlearning_dir)
     for generated in (
         _plot_unlearning_selected_metrics(unlearning_records, args.out_dir, args.dpi),
         _plot_unlearning_delta_heatmap(unlearning_records, args.out_dir, args.dpi),

@@ -1,5 +1,6 @@
 import csv
 import json
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -83,15 +84,73 @@ def infer_split_sizes(loaders: Optional[Dict[str, Any]]) -> Dict[str, int]:
     return split_sizes
 
 
+def make_run_tag(seed: Optional[int] = None, timestamp: Optional[str] = None) -> str:
+    """Build a stable run tag for artifact filenames.
+
+    When a seed is provided, use it as the deterministic tag. Otherwise fall back
+    to a UTC timestamp so repeated runs do not overwrite each other.
+    """
+    if seed is not None:
+        return f"seed{int(seed)}"
+    return timestamp or datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+
+
+def to_serializable_dict(config: Optional[Any]) -> Dict[str, Any]:
+    """Convert config objects (dict/dataclass/namespace) to JSON-safe dicts."""
+    if config is None:
+        return {}
+
+    if isinstance(config, dict):
+        source: Dict[str, Any] = dict(config)
+    elif hasattr(config, "__dict__"):
+        source = dict(vars(config))
+    else:
+        return {"value": str(config)}
+
+    serialized: Dict[str, Any] = {}
+    for key, value in source.items():
+        if isinstance(value, (str, int, float, bool)) or value is None:
+            serialized[str(key)] = value
+        elif isinstance(value, (list, tuple)):
+            normalized_list = []
+            for item in value:
+                if isinstance(item, (str, int, float, bool)) or item is None:
+                    normalized_list.append(item)
+                else:
+                    normalized_list.append(str(item))
+            serialized[str(key)] = normalized_list
+        elif isinstance(value, dict):
+            nested: Dict[str, Any] = {}
+            for nested_key, nested_value in value.items():
+                if isinstance(nested_value, (str, int, float, bool)) or nested_value is None:
+                    nested[str(nested_key)] = nested_value
+                else:
+                    nested[str(nested_key)] = str(nested_value)
+            serialized[str(key)] = nested
+        else:
+            serialized[str(key)] = str(value)
+
+    return serialized
+
+
 def resolve_unlearning_artifact_paths(
     method: str,
     results_path: Optional[str] = None,
     check_path: Optional[str] = None,
     summary_path: Optional[str] = None,
     history_path: Optional[str] = None,
+    run_tag: Optional[str] = None,
 ) -> Tuple[str, str]:
     if summary_path:
         summary_file = Path(summary_path)
+    elif run_tag and results_path:
+        results_file = Path(results_path)
+        summary_file = results_file.with_name(f"{results_file.stem}_{run_tag}_summary.json")
+    elif run_tag and check_path:
+        checkpoint_file = Path(check_path)
+        summary_file = checkpoint_file.with_name(f"{checkpoint_file.stem}_{run_tag}_summary.json")
+    elif run_tag:
+        summary_file = Path("results") / f"{method}_{run_tag}_unlearning_summary.json"
     elif results_path:
         results_file = Path(results_path)
         summary_file = results_file.with_name(f"{results_file.stem}_summary.json")

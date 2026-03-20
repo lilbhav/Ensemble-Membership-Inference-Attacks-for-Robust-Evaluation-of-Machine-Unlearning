@@ -24,14 +24,16 @@ if TP_MACHINEUNLEARNING_ROOT not in sys.path:
 # Framework imports
 from data.loaders import load_dataset, get_num_classes
 from utils.splits import ensure_retain_forget_split, ensure_targeted_random_unlearning_split, ensure_fully_random_unlearning_split
-from utils.metrics import evaluate_split_metrics, log_accuracies
+from utils.metrics import evaluate_split_metrics, log_accuracies, report_weight_diff
 from utils.transfer_setup import ensure_cifar10_from_cifar100_transfer_checkpoint
 from utils.unlearning_results import (
     build_epoch_record,
     build_unlearning_summary,
+    make_run_tag,
     resolve_unlearning_artifact_paths,
     save_unlearning_history_csv,
     save_unlearning_summary,
+    to_serializable_dict,
 )
 
 # Third-party strategy import (delegate algorithm implementation here)
@@ -137,6 +139,7 @@ def scrub(loaders, args):
     epoch_metrics = []
     best_score = float("-inf")
     best_epoch = 0
+    _baseline_state = {k: v.clone() for k, v in model.state_dict().items()}
     best_state_dict = copy.deepcopy(model.state_dict())
     final_acc = dict(baseline_acc)
 
@@ -195,6 +198,8 @@ def scrub(loaders, args):
 
     final_acc.update(evaluate_split_metrics(model, test_loader, device, "test"))
 
+    report_weight_diff(_baseline_state, best_state_dict, "SCRUB")
+
     model.load_state_dict(best_state_dict)
     model.eval()
 
@@ -221,6 +226,7 @@ def scrub(loaders, args):
         check_path=getattr(args, "check_path", None),
         summary_path=getattr(args, "summary_path", None),
         history_path=getattr(args, "history_path", None),
+        run_tag=make_run_tag(seed=int(args.seed)),
     )
 
     history = {
@@ -248,13 +254,7 @@ def scrub(loaders, args):
         selection_strategy="best_valid_tradeoff",
         history_rows=epoch_metrics,
         loaders=loaders,
-        run_config={
-            "dataset": args.dataset,
-            "seed": int(args.seed),
-            "split_protocol": str(getattr(args, "split_protocol", "targeted_random")),
-            "forget_fraction": float(getattr(args, "forget_fraction", 0.0)),
-            "batch_size": int(getattr(args, "batch_size", 64)),
-        },
+        run_config=to_serializable_dict(args),
         artifacts={
             "checkpoint_path": getattr(args, "check_path", None),
             "results_path": results_path,

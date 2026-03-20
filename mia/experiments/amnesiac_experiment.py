@@ -36,9 +36,11 @@ from utils.transfer_setup import ensure_cifar10_from_cifar100_transfer_checkpoin
 from utils.unlearning_results import (
     build_epoch_record,
     build_unlearning_summary,
+    make_run_tag,
     resolve_unlearning_artifact_paths,
     save_unlearning_history_csv,
     save_unlearning_summary,
+    to_serializable_dict,
 )
 try:
     from Third_Party_Code.MachineUnlearning.unlearn_strategies import strategies as third_party_strategies
@@ -227,6 +229,7 @@ def amnesiac(loaders: Dict[str, DataLoader], args: AmnesiacInput):
         check_path=args.check_path,
         summary_path=args.summary_path,
         history_path=args.history_path,
+        run_tag=make_run_tag(seed=int(args.seed)),
     )
 
     history = {
@@ -255,13 +258,7 @@ def amnesiac(loaders: Dict[str, DataLoader], args: AmnesiacInput):
         selection_strategy="last_epoch",
         history_rows=epoch_metrics,
         loaders=loaders,
-        run_config={
-            "dataset": args.dataset,
-            "seed": int(args.seed),
-            "split_protocol": str(args.split_protocol),
-            "forget_fraction": float(args.forget_fraction),
-            "batch_size": int(args.batch_size),
-        },
+        run_config=to_serializable_dict(args),
         artifacts={
             "checkpoint_path": args.check_path,
             "results_path": args.results_path,

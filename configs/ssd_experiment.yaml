@@ -46,5 +46,6 @@ dampening_constant: 1
 selection_weighting: 70
 
 eval_every: 1
+selection_delta: 0.0
 print_accuracies: true
 device: null
