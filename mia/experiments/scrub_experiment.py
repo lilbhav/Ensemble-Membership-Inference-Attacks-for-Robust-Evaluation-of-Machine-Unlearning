@@ -126,6 +126,12 @@ def scrub(loaders, args):
     unlearning_teacher = copy.deepcopy(model)
 
     tr_accs, tf_accs, vr_accs, vf_accs, epoch_list = [], [], [], [], []
+    best_score = float("-inf")
+    best_epoch = 0
+    best_state_dict = copy.deepcopy(model.state_dict())
+
+    retain_weight = float(getattr(args, "retain_weight", 1.0))
+    forget_weight = float(getattr(args, "forget_weight", 1.0))
 
     for epoch in range(1, unlearn_runs + 1):
         model = third_party_strategies.scrub(
@@ -169,6 +175,26 @@ def scrub(loaders, args):
         if args.print_accuracies:
             log_accuracies(results_path, f"epoch {epoch}", acc_dict)
 
+        # Select checkpoint maximizing retain performance while penalizing forget performance.
+        score = (retain_weight * acc_dict["vr_acc"]) - (forget_weight * acc_dict["vf_acc"])
+        if score > best_score:
+            best_score = score
+            best_epoch = epoch
+            best_state_dict = copy.deepcopy(model.state_dict())
+
+    model.load_state_dict(best_state_dict)
+    model.eval()
+
+    selected_acc = {
+        "tr_acc": compute_accuracy(model, train_retain_loader, device),
+        "tf_acc": compute_accuracy(model, train_forget_loader, device),
+        "vr_acc": compute_accuracy(model, valid_retain_loader, device),
+        "vf_acc": compute_accuracy(model, valid_forget_loader, device),
+    }
+
+    if args.print_accuracies:
+        log_accuracies(results_path, f"selected_epoch {best_epoch}", selected_acc)
+
     if getattr(args, "check_path", None) is not None:
         check_dir = os.path.dirname(args.check_path)
         if check_dir:
@@ -181,12 +207,8 @@ def scrub(loaders, args):
         "tf_accs": tf_accs,
         "vr_accs": vr_accs,
         "vf_accs": vf_accs,
-        "selected_acc": {
-            "tr_acc": tr_accs[-1] if tr_accs else baseline_acc["tr_acc"],
-            "tf_acc": tf_accs[-1] if tf_accs else baseline_acc["tf_acc"],
-            "vr_acc": vr_accs[-1] if vr_accs else baseline_acc["vr_acc"],
-            "vf_acc": vf_accs[-1] if vf_accs else baseline_acc["vf_acc"],
-        },
+        "best_epoch": best_epoch,
+        "selected_acc": selected_acc,
     }
 
     return model, history

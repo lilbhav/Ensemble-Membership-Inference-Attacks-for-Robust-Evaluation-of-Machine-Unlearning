@@ -23,6 +23,7 @@ left_out_count: 225
 check_path: /content/gdrive/My Drive/mia_checkpoints/scrub_unlearned_model.pt
 results_path: /content/gdrive/My Drive/mia_checkpoints/scrub_results.txt
 print_accuracies: true
+unlearn_epochs: 3
 
 batch_size: 128
 num_workers: 2
@@ -48,3 +49,8 @@ lr_decay_epochs: []
 lr_decay_rate: 0
 sgda_weight_decay: 0
 sgda_momentum: 0.9
+
+# Wrapper-level model selection across unlearn epochs.
+# score = retain_weight * vr_acc - forget_weight * vf_acc
+retain_weight: 1.0
+forget_weight: 1.5

@@ -162,20 +162,33 @@ def ssd(loaders: Dict[str, DataLoader], args: SSDInput):
     num_channels = int(next(iter(train_retain_loader))[0].shape[1])
     strategy_args = argparse.Namespace()
 
+    def _run_ssd_with_config(current_model: nn.Module) -> nn.Module:
+        # Keep third-party algorithm components, but inject wrapper-configured hyperparameters.
+        # The vendored convenience function currently hardcodes defaults and ignores caller args.
+        parameters = {
+            "lower_bound": float(getattr(args, "lower_bound", 1.0)),
+            "exponent": float(getattr(args, "exponent", 1.0)),
+            "magnitude_diff": None,
+            "min_layer": int(getattr(args, "min_layer", -1)),
+            "max_layer": int(getattr(args, "max_layer", -1)),
+            "forget_threshold": float(getattr(args, "forget_threshold", 1.0)),
+            "dampening_constant": float(getattr(args, "dampening_constant", 1.0)),
+            "selection_weighting": float(getattr(args, "selection_weighting", 10.0)),
+        }
+
+        optimizer = torch.optim.SGD(current_model.parameters(), lr=float(args.learning_rate))
+        pdr = third_party_strategies.ParameterPerturber(current_model, optimizer, device, parameters)
+        current_model = current_model.eval()
+
+        sample_importances = pdr.calc_importance(train_forget_loader)
+        original_importances = pdr.calc_importance(train_retain_loader)
+        pdr.modify_weight(original_importances, sample_importances)
+
+        return current_model
+
     runs = int(getattr(args, "unlearn_epochs", 1))
     for epoch in range(1, runs + 1):
-        model = third_party_strategies.ssd(
-            args=strategy_args,
-            model=model,
-            unlearning_teacher=model,
-            unlearn_class=forget_class,
-            unlearn_loader=train_forget_loader,
-            retain_loader=train_retain_loader,
-            test_loader=test_loader,
-            num_classes=num_classes,
-            num_channels=num_channels,
-            device=device,
-        )
+        model = _run_ssd_with_config(model)
 
         acc_epoch = train_validation(
             model,

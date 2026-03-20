@@ -30,7 +30,7 @@ print_accuracies: true
 
 # Amnesiac hyperparameters
 learning_rate: 0.001
-unlearn_epochs: 5
+unlearn_epochs: 1
 
 eval_every: 1
 device: null
