@@ -13,6 +13,3 @@
 [submodule "llm_unlearning"]
 	path = llm_unlearning
 	url = https://github.com/karuna-bhaila/llm_unlearning.git
-[submodule "Third_Party_Code/MachineUnlearning"]
-	path = Third_Party_Code/MachineUnlearning
-	url = https://github.com/OngWinKent/MachineUnlearning.git
