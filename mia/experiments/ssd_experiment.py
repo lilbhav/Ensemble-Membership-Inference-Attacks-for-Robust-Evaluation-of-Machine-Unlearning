@@ -26,7 +26,7 @@ if TP_MACHINEUNLEARNING_ROOT not in sys.path:
 
 from data.loaders import load_dataset, get_num_classes
 from utils.splits import ensure_retain_forget_split, ensure_targeted_random_unlearning_split, ensure_fully_random_unlearning_split
-from utils.metrics import compute_accuracy, log_accuracies
+from utils.metrics import evaluate_split_metrics, log_accuracies
 from utils.transfer_setup import ensure_cifar10_from_cifar100_transfer_checkpoint
 from utils.unlearning_results import (
     build_epoch_record,
@@ -92,12 +92,12 @@ def train_validation(
     valid_forget_loader: DataLoader,
     device: torch.device,
 ) -> Dict[str, float]:
-    return {
-        "tr_acc": compute_accuracy(model, train_retain_loader, device),
-        "tf_acc": compute_accuracy(model, train_forget_loader, device),
-        "vr_acc": compute_accuracy(model, valid_retain_loader, device),
-        "vf_acc": compute_accuracy(model, valid_forget_loader, device),
-    }
+    metrics: Dict[str, float] = {}
+    metrics.update(evaluate_split_metrics(model, train_retain_loader, device, "tr"))
+    metrics.update(evaluate_split_metrics(model, train_forget_loader, device, "tf"))
+    metrics.update(evaluate_split_metrics(model, valid_retain_loader, device, "vr"))
+    metrics.update(evaluate_split_metrics(model, valid_forget_loader, device, "vf"))
+    return metrics
 
 
 def load_model(dataset: str, checkpoint_path: str, device: torch.device) -> nn.Module:
@@ -154,8 +154,9 @@ def ssd(loaders: Dict[str, DataLoader], args: SSDInput):
         valid_forget_loader,
         device,
     )
-    baseline_test_acc = compute_accuracy(model, test_loader, device)
-    baseline_acc["test_acc"] = baseline_test_acc
+    baseline_test = evaluate_split_metrics(model, test_loader, device, "test")
+    baseline_test_acc = float(baseline_test["test_acc"])
+    baseline_acc.update(baseline_test)
     print(
         "Baseline retain acc - train: {:.4f}, valid: {:.4f}".format(
             baseline_acc["tr_acc"], baseline_acc["vr_acc"]
@@ -234,8 +235,9 @@ def ssd(loaders: Dict[str, DataLoader], args: SSDInput):
         valid_forget_loader,
         device,
     )
-    after_test_acc = compute_accuracy(model, test_loader, device)
-    acc_dict["test_acc"] = after_test_acc
+    test_metrics = evaluate_split_metrics(model, test_loader, device, "test")
+    after_test_acc = float(test_metrics["test_acc"])
+    acc_dict.update(test_metrics)
     final_acc = dict(acc_dict)
 
     if args.print_accuracies:

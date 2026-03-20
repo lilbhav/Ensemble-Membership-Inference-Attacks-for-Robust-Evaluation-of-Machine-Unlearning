@@ -27,7 +27,7 @@ if TP_MACHINEUNLEARNING_ROOT not in sys.path:
     sys.path.insert(0, TP_MACHINEUNLEARNING_ROOT)
 
 from data.loaders import load_dataset, get_num_classes
-from utils.metrics import compute_accuracy, log_accuracies
+from utils.metrics import evaluate_split_metrics, log_accuracies
 from utils.splits import (
     ensure_retain_forget_split,
     ensure_targeted_random_unlearning_split,
@@ -153,12 +153,12 @@ def _infer_forget_class(forget_dataset) -> int:
 
 
 def _evaluate_all(model: nn.Module, loaders: Dict[str, DataLoader], device: torch.device) -> Dict[str, float]:
-    return {
-        "tr_acc": compute_accuracy(model, loaders["train_retain_loader"], device),
-        "tf_acc": compute_accuracy(model, loaders["train_forget_loader"], device),
-        "vr_acc": compute_accuracy(model, loaders["valid_retain_loader"], device),
-        "vf_acc": compute_accuracy(model, loaders["valid_forget_loader"], device),
-    }
+    metrics: Dict[str, float] = {}
+    metrics.update(evaluate_split_metrics(model, loaders["train_retain_loader"], device, "tr"))
+    metrics.update(evaluate_split_metrics(model, loaders["train_forget_loader"], device, "tf"))
+    metrics.update(evaluate_split_metrics(model, loaders["valid_retain_loader"], device, "vr"))
+    metrics.update(evaluate_split_metrics(model, loaders["valid_forget_loader"], device, "vf"))
+    return metrics
 
 
 def bad_teacher(loaders: Dict[str, DataLoader], args: BadTeacherInput):
@@ -173,7 +173,7 @@ def bad_teacher(loaders: Dict[str, DataLoader], args: BadTeacherInput):
     unlearning_teacher = _load_model(args.dataset, args.model_path, device)
 
     baseline_acc = _evaluate_all(model, loaders, device)
-    baseline_acc["test_acc"] = compute_accuracy(model, loaders["test_loader"], device)
+    baseline_acc.update(evaluate_split_metrics(model, loaders["test_loader"], device, "test"))
     if args.print_accuracies:
         line = log_accuracies(args.results_path, "baseline", baseline_acc)
         print(f"   {line}")
@@ -252,8 +252,9 @@ def bad_teacher(loaders: Dict[str, DataLoader], args: BadTeacherInput):
             print(f"   {line}")
 
     model.eval()
-    test_acc = compute_accuracy(model, loaders["test_loader"], device)
-    final_acc["test_acc"] = test_acc
+    test_metrics = evaluate_split_metrics(model, loaders["test_loader"], device, "test")
+    test_acc = float(test_metrics["test_acc"])
+    final_acc.update(test_metrics)
 
     if args.print_accuracies:
         line = log_accuracies(args.results_path, "final", final_acc)

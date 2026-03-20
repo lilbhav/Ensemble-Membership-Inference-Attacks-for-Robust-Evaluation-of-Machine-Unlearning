@@ -4,7 +4,22 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 
-ACCURACY_KEYS: Tuple[str, ...] = ("tr_acc", "tf_acc", "vr_acc", "vf_acc", "test_acc")
+SPLIT_PREFIXES: Tuple[str, ...] = ("tr", "tf", "vr", "vf", "test")
+METRIC_SUFFIXES: Tuple[str, ...] = (
+    "acc",
+    "precision_macro",
+    "recall_macro",
+    "f1_macro",
+    "precision_weighted",
+    "recall_weighted",
+    "f1_weighted",
+)
+METRIC_KEYS: Tuple[str, ...] = tuple(
+    f"{split}_{metric}"
+    for split in SPLIT_PREFIXES
+    for metric in METRIC_SUFFIXES
+)
+ACCURACY_KEYS: Tuple[str, ...] = tuple(f"{split}_acc" for split in SPLIT_PREFIXES)
 
 
 def normalize_accuracy_dict(metrics: Optional[Dict[str, Any]]) -> Dict[str, float]:
@@ -12,7 +27,7 @@ def normalize_accuracy_dict(metrics: Optional[Dict[str, Any]]) -> Dict[str, floa
     if not metrics:
         return normalized
 
-    for key in ACCURACY_KEYS:
+    for key in METRIC_KEYS:
         value = metrics.get(key)
         if value is not None:
             normalized[key] = float(value)
@@ -106,7 +121,7 @@ def save_unlearning_history_csv(history_path: str, history_rows: Sequence[Dict[s
     history_file = Path(history_path)
     history_file.parent.mkdir(parents=True, exist_ok=True)
 
-    fieldnames = ["epoch", *ACCURACY_KEYS]
+    fieldnames = ["epoch", *METRIC_KEYS]
     with history_file.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=fieldnames)
         writer.writeheader()

@@ -12,12 +12,49 @@ import csv
 import json
 import re
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 import matplotlib.pyplot as plt
 
 
 UTILITY_KEYS = ("tr_acc", "tf_acc", "vr_acc", "vf_acc")
+UNLEARNING_METRIC_KEYS = (
+    "tr_acc",
+    "tf_acc",
+    "vr_acc",
+    "vf_acc",
+    "test_acc",
+    "tr_precision_macro",
+    "tf_precision_macro",
+    "vr_precision_macro",
+    "vf_precision_macro",
+    "test_precision_macro",
+    "tr_recall_macro",
+    "tf_recall_macro",
+    "vr_recall_macro",
+    "vf_recall_macro",
+    "test_recall_macro",
+    "tr_f1_macro",
+    "tf_f1_macro",
+    "vr_f1_macro",
+    "vf_f1_macro",
+    "test_f1_macro",
+    "tr_precision_weighted",
+    "tf_precision_weighted",
+    "vr_precision_weighted",
+    "vf_precision_weighted",
+    "test_precision_weighted",
+    "tr_recall_weighted",
+    "tf_recall_weighted",
+    "vr_recall_weighted",
+    "vf_recall_weighted",
+    "test_recall_weighted",
+    "tr_f1_weighted",
+    "tf_f1_weighted",
+    "vr_f1_weighted",
+    "vf_f1_weighted",
+    "test_f1_weighted",
+)
 METHOD_ALIASES = {
     "amnesiac_unlearned_model": "amnesiac",
     "bad_teacher_unlearned_model": "bad_teacher",
@@ -94,14 +131,13 @@ def parse_unlearning_summary(summary_path: Path) -> Optional[Dict[str, Optional[
     if not isinstance(selected, dict) or not isinstance(baseline, dict):
         return None
 
-    return {
-        "tr_acc": selected.get("tr_acc"),
-        "tf_acc": selected.get("tf_acc"),
-        "vr_acc": selected.get("vr_acc"),
-        "vf_acc": selected.get("vf_acc"),
-        "baseline_tf_acc": baseline.get("tf_acc"),
-        "baseline_vr_acc": baseline.get("vr_acc"),
+    payload: Dict[str, Optional[float]] = {
+        "baseline_tf_acc": _to_float(baseline.get("tf_acc")),
+        "baseline_vr_acc": _to_float(baseline.get("vr_acc")),
     }
+    for key in UNLEARNING_METRIC_KEYS:
+        payload[key] = _to_float(selected.get(key))
+    return payload
 
 
 def discover_unlearning_summary(method_dir: Path) -> Optional[Path]:
@@ -251,6 +287,503 @@ def read_sweep_csv(csv_path: Path) -> List[Dict[str, float]]:
                 }
             )
     return rows
+
+
+def _to_float(value: object) -> Optional[float]:
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return None
+        try:
+            return float(stripped)
+        except ValueError:
+            return None
+    return None
+
+
+def _parse_unlearning_results_txt(results_txt: Path) -> Dict[str, object]:
+    text = results_txt.read_text(encoding="utf-8", errors="ignore")
+    line_re = re.compile(
+        r"^\s*([^|]+?)\s*\|\s*"
+        r"tr_acc\s*:\s*([0-9]*\.?[0-9]+)\s+"
+        r"tf_acc\s*:\s*([0-9]*\.?[0-9]+)\s+"
+        r"vr_acc\s*:\s*([0-9]*\.?[0-9]+)\s+"
+        r"vf_acc\s*:\s*([0-9]*\.?[0-9]+)\s*$",
+        flags=re.IGNORECASE,
+    )
+
+    baseline: Dict[str, float] = {}
+    selected: Dict[str, float] = {}
+    history: List[Dict[str, object]] = []
+    step_index = 0
+
+    for raw_line in text.splitlines():
+        match = line_re.match(raw_line)
+        if not match:
+            continue
+
+        label, tr_acc, tf_acc, vr_acc, vf_acc = match.groups()
+        normalized = label.strip().lower()
+        parsed = {
+            "tr_acc": float(tr_acc),
+            "tf_acc": float(tf_acc),
+            "vr_acc": float(vr_acc),
+            "vf_acc": float(vf_acc),
+        }
+
+        if "baseline" in normalized:
+            baseline = parsed
+            continue
+
+        if any(key in normalized for key in ("selected_model", "selected_epoch", "final", "after_ssd")):
+            selected = parsed
+
+        if any(key in normalized for key in ("epoch", "forget_step", "retain_epoch")):
+            step_match = re.search(r"(\d+)", normalized)
+            step_index += 1
+            history.append(
+                {
+                    "step": int(step_match.group(1)) if step_match else step_index,
+                    "label": label.strip(),
+                    **parsed,
+                }
+            )
+
+    if not selected and history:
+        selected = {
+            "tr_acc": _to_float(history[-1].get("tr_acc")),
+            "tf_acc": _to_float(history[-1].get("tf_acc")),
+            "vr_acc": _to_float(history[-1].get("vr_acc")),
+            "vf_acc": _to_float(history[-1].get("vf_acc")),
+        }
+
+    return {
+        "baseline": baseline,
+        "selected": selected,
+        "history": history,
+    }
+
+
+def _read_history_csv(history_path: Path) -> List[Dict[str, object]]:
+    rows: List[Dict[str, object]] = []
+    with history_path.open("r", encoding="utf-8", newline="") as handle:
+        reader = csv.DictReader(handle)
+        for row in reader:
+            step = _to_float(row.get("epoch"))
+            parsed: Dict[str, object] = {
+                "step": int(step) if step is not None else len(rows) + 1,
+                "label": f"epoch {int(step) if step is not None else len(rows) + 1}",
+                "tr_acc": _to_float(row.get("tr_acc")),
+                "tf_acc": _to_float(row.get("tf_acc")),
+                "vr_acc": _to_float(row.get("vr_acc")),
+                "vf_acc": _to_float(row.get("vf_acc")),
+                "test_acc": _to_float(row.get("test_acc")),
+            }
+            for key in UNLEARNING_METRIC_KEYS:
+                if key not in parsed:
+                    parsed[key] = _to_float(row.get(key))
+            rows.append(parsed)
+    return rows
+
+
+def _collect_unlearning_records(unlearning_dir: Path) -> List[Dict[str, object]]:
+    if not unlearning_dir.exists():
+        return []
+
+    records: List[Dict[str, object]] = []
+
+    for results_txt in sorted(unlearning_dir.glob("*_results.txt")):
+        method = results_txt.name[: -len("_results.txt")]
+        text_payload = _parse_unlearning_results_txt(results_txt)
+        baseline = dict(text_payload.get("baseline", {}))
+        selected = dict(text_payload.get("selected", {}))
+        history = list(text_payload.get("history", []))
+
+        summary_path = unlearning_dir / f"{method}_results_summary.json"
+        if summary_path.exists():
+            parsed_summary = parse_unlearning_summary(summary_path)
+            if parsed_summary is not None:
+                baseline_tf = _to_float(parsed_summary.get("baseline_tf_acc"))
+                baseline_vr = _to_float(parsed_summary.get("baseline_vr_acc"))
+                if baseline_tf is not None:
+                    baseline["tf_acc"] = baseline_tf
+                if baseline_vr is not None:
+                    baseline["vr_acc"] = baseline_vr
+
+                for key in UNLEARNING_METRIC_KEYS:
+                    value = _to_float(parsed_summary.get(key))
+                    if value is not None:
+                        selected[key] = value
+
+            try:
+                summary_data = json.loads(summary_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                summary_data = {}
+
+            metrics = summary_data.get("metrics") if isinstance(summary_data, dict) else None
+            if isinstance(metrics, dict):
+                baseline_metrics = metrics.get("baseline")
+                selected_metrics = metrics.get("selected")
+                if isinstance(baseline_metrics, dict):
+                    for key in UNLEARNING_METRIC_KEYS:
+                        value = _to_float(baseline_metrics.get(key))
+                        if value is not None:
+                            baseline[key] = value
+                if isinstance(selected_metrics, dict):
+                    for key in UNLEARNING_METRIC_KEYS:
+                        value = _to_float(selected_metrics.get(key))
+                        if value is not None:
+                            selected[key] = value
+
+        history_csv = unlearning_dir / f"{method}_results_summary_history.csv"
+        if history_csv.exists():
+            csv_history = _read_history_csv(history_csv)
+            if csv_history:
+                history = csv_history
+
+        records.append(
+            {
+                "method": method,
+                "results_txt": results_txt.name,
+                "summary_json_present": summary_path.exists(),
+                "history_csv_present": history_csv.exists(),
+                "baseline": baseline,
+                "selected": selected,
+                "history": history,
+            }
+        )
+
+    return records
+
+
+def _plot_unlearning_selected_metrics(records: List[Dict[str, object]], out_dir: Path, dpi: int) -> Optional[Path]:
+    if not records:
+        return None
+
+    methods = [str(row["method"]) for row in records]
+    metric_specs = [
+        ("vr_acc", "selected vr_acc"),
+        ("tf_acc", "selected tf_acc"),
+        ("vf_acc", "selected vf_acc"),
+        ("test_acc", "selected test_acc"),
+    ]
+    width = 0.2
+    x = list(range(len(methods)))
+
+    fig, ax = plt.subplots(figsize=(12, 6))
+    for idx, (key, label) in enumerate(metric_specs):
+        values: List[float] = []
+        for row in records:
+            selected = row.get("selected", {})
+            if not isinstance(selected, dict):
+                values.append(float("nan"))
+                continue
+            value = _to_float(selected.get(key))
+            values.append(float("nan") if value is None else value)
+
+        offset = [(pos + (idx - 1.5) * width) for pos in x]
+        ax.bar(offset, values, width=width, label=label)
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(methods, rotation=20, ha="right")
+    ax.set_ylim(0, 1.0)
+    ax.set_ylabel("Accuracy")
+    ax.set_title("Unlearning Results: Selected Metrics by Method")
+    ax.legend()
+    ax.grid(axis="y", alpha=0.25)
+    fig.tight_layout()
+
+    out_path = out_dir / "unlearning_selected_metrics_bar.png"
+    fig.savefig(out_path, dpi=dpi)
+    plt.close(fig)
+    return out_path
+
+
+def _plot_unlearning_delta_heatmap(records: List[Dict[str, object]], out_dir: Path, dpi: int) -> Optional[Path]:
+    if not records:
+        return None
+
+    metric_order = ["tr_acc", "tf_acc", "vr_acc", "vf_acc", "test_acc"]
+    methods = [str(row["method"]) for row in records]
+
+    matrix: List[List[float]] = []
+    for row in records:
+        baseline = row.get("baseline", {})
+        selected = row.get("selected", {})
+        if not isinstance(baseline, dict) or not isinstance(selected, dict):
+            continue
+
+        values: List[float] = []
+        for key in metric_order:
+            b_value = _to_float(baseline.get(key))
+            s_value = _to_float(selected.get(key))
+            if b_value is None or s_value is None:
+                values.append(float("nan"))
+            else:
+                values.append(s_value - b_value)
+        matrix.append(values)
+
+    if not matrix:
+        return None
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+    image = ax.imshow(matrix, aspect="auto", cmap="RdYlGn")
+    cbar = fig.colorbar(image, ax=ax)
+    cbar.set_label("selected - baseline")
+
+    ax.set_xticks(range(len(metric_order)))
+    ax.set_xticklabels(metric_order, rotation=25, ha="right")
+    ax.set_yticks(range(len(methods)))
+    ax.set_yticklabels(methods)
+    ax.set_title("Unlearning Metric Deltas from Baseline")
+
+    for i, row_values in enumerate(matrix):
+        for j, value in enumerate(row_values):
+            if value == value:
+                ax.text(j, i, f"{value:+.3f}", ha="center", va="center", fontsize=8)
+
+    fig.tight_layout()
+    out_path = out_dir / "unlearning_delta_heatmap.png"
+    fig.savefig(out_path, dpi=dpi)
+    plt.close(fig)
+    return out_path
+
+
+def _plot_unlearning_forget_retain_scatter(records: List[Dict[str, object]], out_dir: Path, dpi: int) -> Optional[Path]:
+    points: List[Tuple[str, float, float]] = []
+    for row in records:
+        selected = row.get("selected", {})
+        if not isinstance(selected, dict):
+            continue
+        vr_acc = _to_float(selected.get("vr_acc"))
+        tf_acc = _to_float(selected.get("tf_acc"))
+        if vr_acc is None or tf_acc is None:
+            continue
+        points.append((str(row["method"]), vr_acc, tf_acc))
+
+    if not points:
+        return None
+
+    fig, ax = plt.subplots(figsize=(8, 6))
+    for method, vr_acc, tf_acc in points:
+        ax.scatter([vr_acc], [tf_acc], s=90)
+        ax.annotate(method, (vr_acc, tf_acc), textcoords="offset points", xytext=(5, 5))
+
+    ax.set_xlim(0, 1.0)
+    ax.set_ylim(0, 1.0)
+    ax.set_xlabel("Retain utility (selected vr_acc)")
+    ax.set_ylabel("Forget retention (selected tf_acc, lower is better)")
+    ax.set_title("Unlearning Tradeoff: Retain vs Forget Accuracy")
+    ax.grid(alpha=0.3)
+    fig.tight_layout()
+
+    out_path = out_dir / "unlearning_forget_retain_scatter.png"
+    fig.savefig(out_path, dpi=dpi)
+    plt.close(fig)
+    return out_path
+
+
+def _plot_unlearning_history(records: List[Dict[str, object]], out_dir: Path, dpi: int) -> Optional[Path]:
+    metric_order = ["tr_acc", "tf_acc", "vr_acc", "vf_acc"]
+    plotted_methods: Set[str] = set()
+
+    fig, axes = plt.subplots(2, 2, figsize=(12, 8), sharex=False, sharey=True)
+    axes_flat = axes.flatten()
+
+    for record in records:
+        history = record.get("history", [])
+        if not isinstance(history, list) or not history:
+            continue
+
+        method = str(record["method"])
+        x_values = [int(_to_float(item.get("step")) or idx + 1) for idx, item in enumerate(history)]
+
+        for axis, metric in zip(axes_flat, metric_order):
+            y_values = [_to_float(item.get(metric)) for item in history]
+            if not any(v is not None for v in y_values):
+                continue
+            axis.plot(
+                x_values,
+                [float("nan") if value is None else value for value in y_values],
+                marker="o",
+                linewidth=1.6,
+                label=method,
+            )
+            axis.set_title(metric)
+            axis.set_ylim(0, 1.0)
+            axis.grid(alpha=0.25)
+            plotted_methods.add(method)
+
+    if not plotted_methods:
+        plt.close(fig)
+        return None
+
+    for axis in axes_flat:
+        axis.set_xlabel("Step")
+        axis.set_ylabel("Accuracy")
+
+    handles, labels = axes_flat[0].get_legend_handles_labels()
+    if handles:
+        fig.legend(handles, labels, loc="upper center", ncol=min(5, len(labels)))
+
+    fig.suptitle("Unlearning Metric Trajectories from History Files", y=1.02)
+    fig.tight_layout()
+
+    out_path = out_dir / "unlearning_history_lines.png"
+    fig.savefig(out_path, dpi=dpi)
+    plt.close(fig)
+    return out_path
+
+
+def _plot_unlearning_prf_macro(records: List[Dict[str, object]], out_dir: Path, dpi: int) -> Optional[Path]:
+    if not records:
+        return None
+
+    methods = [str(row["method"]) for row in records]
+    retain_specs = [
+        ("vr_precision_macro", "retain precision"),
+        ("vr_recall_macro", "retain recall"),
+        ("vr_f1_macro", "retain f1"),
+    ]
+    forget_specs = [
+        ("vf_precision_macro", "forget precision"),
+        ("vf_recall_macro", "forget recall"),
+        ("vf_f1_macro", "forget f1"),
+    ]
+
+    fig, axes = plt.subplots(1, 2, figsize=(14, 6), sharey=True)
+    x = list(range(len(methods)))
+    width = 0.25
+
+    for axis, specs, title in (
+        (axes[0], retain_specs, "Selected Retain Macro PRF"),
+        (axes[1], forget_specs, "Selected Forget Macro PRF"),
+    ):
+        for idx, (key, label) in enumerate(specs):
+            values: List[float] = []
+            for row in records:
+                selected = row.get("selected", {})
+                value = _to_float(selected.get(key)) if isinstance(selected, dict) else None
+                values.append(float("nan") if value is None else value)
+
+            offset = [pos + (idx - 1.0) * width for pos in x]
+            axis.bar(offset, values, width=width, label=label)
+
+        axis.set_xticks(x)
+        axis.set_xticklabels(methods, rotation=20, ha="right")
+        axis.set_ylim(0, 1.0)
+        axis.set_title(title)
+        axis.grid(axis="y", alpha=0.25)
+
+    axes[0].set_ylabel("Score")
+    axes[0].legend()
+    axes[1].legend()
+    fig.suptitle("Unlearning Precision/Recall/F1 Comparison (Macro)")
+    fig.tight_layout()
+
+    out_path = out_dir / "unlearning_prf_macro_bar.png"
+    fig.savefig(out_path, dpi=dpi)
+    plt.close(fig)
+    return out_path
+
+
+def write_unlearning_summary_csv(records: List[Dict[str, object]], out_dir: Path) -> Optional[Path]:
+    if not records:
+        return None
+
+    out_path = out_dir / "unlearning_plot_data_summary.csv"
+    fieldnames = [
+        "method",
+        "results_txt",
+        "summary_json_present",
+        "history_csv_present",
+        "baseline_tr_acc",
+        "baseline_tf_acc",
+        "baseline_vr_acc",
+        "baseline_vf_acc",
+        "baseline_test_acc",
+        "selected_tr_acc",
+        "selected_tf_acc",
+        "selected_vr_acc",
+        "selected_vf_acc",
+        "selected_test_acc",
+        "delta_tr_acc",
+        "delta_tf_acc",
+        "delta_vr_acc",
+        "delta_vf_acc",
+        "delta_test_acc",
+        "selected_vr_precision_macro",
+        "selected_vr_recall_macro",
+        "selected_vr_f1_macro",
+        "selected_vf_precision_macro",
+        "selected_vf_recall_macro",
+        "selected_vf_f1_macro",
+        "selected_test_f1_macro",
+        "selected_test_f1_weighted",
+        "history_points",
+    ]
+
+    with out_path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        for record in records:
+            baseline = record.get("baseline", {})
+            selected = record.get("selected", {})
+            history = record.get("history", [])
+            if not isinstance(baseline, dict):
+                baseline = {}
+            if not isinstance(selected, dict):
+                selected = {}
+            if not isinstance(history, list):
+                history = []
+
+            delta_values: Dict[str, Optional[float]] = {}
+            for key in UNLEARNING_METRIC_KEYS:
+                b_value = _to_float(baseline.get(key))
+                s_value = _to_float(selected.get(key))
+                if b_value is None or s_value is None:
+                    delta_values[key] = None
+                else:
+                    delta_values[key] = s_value - b_value
+
+            writer.writerow(
+                {
+                    "method": record.get("method"),
+                    "results_txt": record.get("results_txt"),
+                    "summary_json_present": record.get("summary_json_present"),
+                    "history_csv_present": record.get("history_csv_present"),
+                    "baseline_tr_acc": _to_float(baseline.get("tr_acc")),
+                    "baseline_tf_acc": _to_float(baseline.get("tf_acc")),
+                    "baseline_vr_acc": _to_float(baseline.get("vr_acc")),
+                    "baseline_vf_acc": _to_float(baseline.get("vf_acc")),
+                    "baseline_test_acc": _to_float(baseline.get("test_acc")),
+                    "selected_tr_acc": _to_float(selected.get("tr_acc")),
+                    "selected_tf_acc": _to_float(selected.get("tf_acc")),
+                    "selected_vr_acc": _to_float(selected.get("vr_acc")),
+                    "selected_vf_acc": _to_float(selected.get("vf_acc")),
+                    "selected_test_acc": _to_float(selected.get("test_acc")),
+                    "delta_tr_acc": delta_values.get("tr_acc"),
+                    "delta_tf_acc": delta_values.get("tf_acc"),
+                    "delta_vr_acc": delta_values.get("vr_acc"),
+                    "delta_vf_acc": delta_values.get("vf_acc"),
+                    "delta_test_acc": delta_values.get("test_acc"),
+                    "selected_vr_precision_macro": _to_float(selected.get("vr_precision_macro")),
+                    "selected_vr_recall_macro": _to_float(selected.get("vr_recall_macro")),
+                    "selected_vr_f1_macro": _to_float(selected.get("vr_f1_macro")),
+                    "selected_vf_precision_macro": _to_float(selected.get("vf_precision_macro")),
+                    "selected_vf_recall_macro": _to_float(selected.get("vf_recall_macro")),
+                    "selected_vf_f1_macro": _to_float(selected.get("vf_f1_macro")),
+                    "selected_test_f1_macro": _to_float(selected.get("test_f1_macro")),
+                    "selected_test_f1_weighted": _to_float(selected.get("test_f1_weighted")),
+                    "history_points": len(history),
+                }
+            )
+
+    return out_path
 
 
 def _plot_utility_bars(utility_rows: List[Dict[str, object]], out_dir: Path, dpi: int) -> Optional[Path]:
@@ -543,6 +1076,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--dpi", type=int, default=180, help="DPI for saved PNG figures")
     parser.add_argument(
+        "--unlearning-dir",
+        type=Path,
+        default=Path("results") / "unlearningresults",
+        help="Directory containing unlearning result files (*_results.txt, *_summary.json, *_history.csv)",
+    )
+    parser.add_argument(
         "--privacy-lambda",
         type=float,
         default=1.0,
@@ -597,6 +1136,18 @@ def main() -> None:
         args.out_dir,
     )
     generated_paths.append(summary_csv)
+
+    unlearning_records = _collect_unlearning_records(args.unlearning_dir)
+    for generated in (
+        _plot_unlearning_selected_metrics(unlearning_records, args.out_dir, args.dpi),
+        _plot_unlearning_delta_heatmap(unlearning_records, args.out_dir, args.dpi),
+        _plot_unlearning_forget_retain_scatter(unlearning_records, args.out_dir, args.dpi),
+        _plot_unlearning_history(unlearning_records, args.out_dir, args.dpi),
+        _plot_unlearning_prf_macro(unlearning_records, args.out_dir, args.dpi),
+        write_unlearning_summary_csv(unlearning_records, args.out_dir),
+    ):
+        if generated is not None:
+            generated_paths.append(generated)
 
     print("Generated files:")
     for path in generated_paths:

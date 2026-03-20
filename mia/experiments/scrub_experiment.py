@@ -24,7 +24,7 @@ if TP_MACHINEUNLEARNING_ROOT not in sys.path:
 # Framework imports
 from data.loaders import load_dataset, get_num_classes
 from utils.splits import ensure_retain_forget_split, ensure_targeted_random_unlearning_split, ensure_fully_random_unlearning_split
-from utils.metrics import compute_accuracy, log_accuracies
+from utils.metrics import evaluate_split_metrics, log_accuracies
 from utils.transfer_setup import ensure_cifar10_from_cifar100_transfer_checkpoint
 from utils.unlearning_results import (
     build_epoch_record,
@@ -106,13 +106,12 @@ def scrub(loaders, args):
     test_loader = loaders["test_loader"]
     results_path = getattr(args, "results_path", None)
 
-    baseline_acc = {
-        "tr_acc": compute_accuracy(model, train_retain_loader, device),
-        "tf_acc": compute_accuracy(model, train_forget_loader, device),
-        "vr_acc": compute_accuracy(model, valid_retain_loader, device),
-        "vf_acc": compute_accuracy(model, valid_forget_loader, device),
-    }
-    baseline_acc["test_acc"] = compute_accuracy(model, test_loader, device)
+    baseline_acc = {}
+    baseline_acc.update(evaluate_split_metrics(model, train_retain_loader, device, "tr"))
+    baseline_acc.update(evaluate_split_metrics(model, train_forget_loader, device, "tf"))
+    baseline_acc.update(evaluate_split_metrics(model, valid_retain_loader, device, "vr"))
+    baseline_acc.update(evaluate_split_metrics(model, valid_forget_loader, device, "vf"))
+    baseline_acc.update(evaluate_split_metrics(model, test_loader, device, "test"))
     print(
         "Baseline - tr_acc: {tr:.4f}, tf_acc: {tf:.4f}, vr_acc: {vr:.4f}, vf_acc: {vf:.4f}".format(
             tr=baseline_acc["tr_acc"],
@@ -159,12 +158,11 @@ def scrub(loaders, args):
         )
 
         model.eval()
-        acc_dict = {
-            "tr_acc": compute_accuracy(model, train_retain_loader, device),
-            "tf_acc": compute_accuracy(model, train_forget_loader, device),
-            "vr_acc": compute_accuracy(model, valid_retain_loader, device),
-            "vf_acc": compute_accuracy(model, valid_forget_loader, device),
-        }
+        acc_dict = {}
+        acc_dict.update(evaluate_split_metrics(model, train_retain_loader, device, "tr"))
+        acc_dict.update(evaluate_split_metrics(model, train_forget_loader, device, "tf"))
+        acc_dict.update(evaluate_split_metrics(model, valid_retain_loader, device, "vr"))
+        acc_dict.update(evaluate_split_metrics(model, valid_forget_loader, device, "vf"))
 
         tr_accs.append(acc_dict["tr_acc"])
         tf_accs.append(acc_dict["tf_acc"])
@@ -195,18 +193,17 @@ def scrub(loaders, args):
             best_epoch = epoch
             best_state_dict = copy.deepcopy(model.state_dict())
 
-    final_acc["test_acc"] = compute_accuracy(model, test_loader, device)
+    final_acc.update(evaluate_split_metrics(model, test_loader, device, "test"))
 
     model.load_state_dict(best_state_dict)
     model.eval()
 
-    selected_acc = {
-        "tr_acc": compute_accuracy(model, train_retain_loader, device),
-        "tf_acc": compute_accuracy(model, train_forget_loader, device),
-        "vr_acc": compute_accuracy(model, valid_retain_loader, device),
-        "vf_acc": compute_accuracy(model, valid_forget_loader, device),
-    }
-    selected_acc["test_acc"] = compute_accuracy(model, test_loader, device)
+    selected_acc = {}
+    selected_acc.update(evaluate_split_metrics(model, train_retain_loader, device, "tr"))
+    selected_acc.update(evaluate_split_metrics(model, train_forget_loader, device, "tf"))
+    selected_acc.update(evaluate_split_metrics(model, valid_retain_loader, device, "vr"))
+    selected_acc.update(evaluate_split_metrics(model, valid_forget_loader, device, "vf"))
+    selected_acc.update(evaluate_split_metrics(model, test_loader, device, "test"))
 
     if args.print_accuracies:
         log_accuracies(results_path, f"selected_epoch {best_epoch}", selected_acc)
