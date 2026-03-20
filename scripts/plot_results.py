@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import re
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -18,7 +19,8 @@ import matplotlib.pyplot as plt
 
 UTILITY_KEYS = ("tr_acc", "tf_acc", "vr_acc", "vf_acc")
 METHOD_ALIASES = {
-    "unlearned_model": "fine_tune",
+    "amnesiac_unlearned_model": "amnesiac",
+    "bad_teacher_unlearned_model": "bad_teacher",
     "scrub_unlearned_model": "scrub",
     "ssd_unlearned_model": "ssd",
 }
@@ -75,6 +77,42 @@ def parse_baseline_utility_metrics(results_txt: Path) -> Dict[str, Optional[floa
         "baseline_tf_acc": baseline_tf,
         "baseline_vr_acc": baseline_vr,
     }
+
+
+def parse_unlearning_summary(summary_path: Path) -> Optional[Dict[str, Optional[float]]]:
+    try:
+        data = json.loads(summary_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+
+    metrics = data.get("metrics")
+    if not isinstance(metrics, dict):
+        return None
+
+    selected = metrics.get("selected")
+    baseline = metrics.get("baseline")
+    if not isinstance(selected, dict) or not isinstance(baseline, dict):
+        return None
+
+    return {
+        "tr_acc": selected.get("tr_acc"),
+        "tf_acc": selected.get("tf_acc"),
+        "vr_acc": selected.get("vr_acc"),
+        "vf_acc": selected.get("vf_acc"),
+        "baseline_tf_acc": baseline.get("tf_acc"),
+        "baseline_vr_acc": baseline.get("vr_acc"),
+    }
+
+
+def discover_unlearning_summary(method_dir: Path) -> Optional[Path]:
+    excluded_names = {"attacks_summary.json", "config.json"}
+    for candidate in sorted(method_dir.glob("*summary.json")):
+        if candidate.name in excluded_names:
+            continue
+        parsed = parse_unlearning_summary(candidate)
+        if parsed is not None:
+            return candidate
+    return None
 
 
 def _safe_mean(values: List[float]) -> Optional[float]:
@@ -438,8 +476,18 @@ def build_records(results_dir: Path) -> Tuple[List[Dict[str, object]], List[Dict
             continue
 
         method = _method_name(method_dir.name)
+        summary_path = discover_unlearning_summary(method_dir)
         results_txt = method_dir / "results.txt"
-        if results_txt.exists():
+        if summary_path is not None:
+            summary_metrics = parse_unlearning_summary(summary_path)
+            if summary_metrics is not None:
+                utility_rows.append(
+                    {
+                        "method": method,
+                        **summary_metrics,
+                    }
+                )
+        elif results_txt.exists():
             utility = parse_utility_metrics(results_txt)
             baseline_utility = parse_baseline_utility_metrics(results_txt)
             utility_rows.append(

@@ -26,6 +26,13 @@ from data.loaders import load_dataset, get_num_classes
 from utils.splits import ensure_retain_forget_split, ensure_targeted_random_unlearning_split, ensure_fully_random_unlearning_split
 from utils.metrics import compute_accuracy, log_accuracies
 from utils.transfer_setup import ensure_cifar10_from_cifar100_transfer_checkpoint
+from utils.unlearning_results import (
+    build_epoch_record,
+    build_unlearning_summary,
+    resolve_unlearning_artifact_paths,
+    save_unlearning_history_csv,
+    save_unlearning_summary,
+)
 
 # Third-party strategy import (delegate algorithm implementation here)
 try:
@@ -105,6 +112,7 @@ def scrub(loaders, args):
         "vr_acc": compute_accuracy(model, valid_retain_loader, device),
         "vf_acc": compute_accuracy(model, valid_forget_loader, device),
     }
+    baseline_acc["test_acc"] = compute_accuracy(model, test_loader, device)
     print(
         "Baseline - tr_acc: {tr:.4f}, tf_acc: {tf:.4f}, vr_acc: {vr:.4f}, vf_acc: {vf:.4f}".format(
             tr=baseline_acc["tr_acc"],
@@ -115,6 +123,7 @@ def scrub(loaders, args):
     )
     if args.print_accuracies:
         log_accuracies(results_path, "baseline", baseline_acc)
+        print(f"   baseline | test_acc: {baseline_acc['test_acc']:.4f}")
 
     forget_class = int(getattr(args, "forget_class", _infer_forget_class(train_forget_loader.dataset)))
     num_classes = int(get_num_classes(args.dataset))
@@ -126,9 +135,11 @@ def scrub(loaders, args):
     unlearning_teacher = copy.deepcopy(model)
 
     tr_accs, tf_accs, vr_accs, vf_accs, epoch_list = [], [], [], [], []
+    epoch_metrics = []
     best_score = float("-inf")
     best_epoch = 0
     best_state_dict = copy.deepcopy(model.state_dict())
+    final_acc = dict(baseline_acc)
 
     retain_weight = float(getattr(args, "retain_weight", 1.0))
     forget_weight = float(getattr(args, "forget_weight", 1.0))
@@ -160,6 +171,8 @@ def scrub(loaders, args):
         vr_accs.append(acc_dict["vr_acc"])
         vf_accs.append(acc_dict["vf_acc"])
         epoch_list.append(epoch)
+        epoch_metrics.append(build_epoch_record(epoch, acc_dict))
+        final_acc = dict(acc_dict)
 
         print(
             "[SCRUB third-party {}/{}] tr={:.4f} tf={:.4f} vr={:.4f} vf={:.4f}".format(
@@ -182,6 +195,8 @@ def scrub(loaders, args):
             best_epoch = epoch
             best_state_dict = copy.deepcopy(model.state_dict())
 
+    final_acc["test_acc"] = compute_accuracy(model, test_loader, device)
+
     model.load_state_dict(best_state_dict)
     model.eval()
 
@@ -191,15 +206,25 @@ def scrub(loaders, args):
         "vr_acc": compute_accuracy(model, valid_retain_loader, device),
         "vf_acc": compute_accuracy(model, valid_forget_loader, device),
     }
+    selected_acc["test_acc"] = compute_accuracy(model, test_loader, device)
 
     if args.print_accuracies:
         log_accuracies(results_path, f"selected_epoch {best_epoch}", selected_acc)
+        print(f"   selected_epoch {best_epoch} | test_acc: {selected_acc['test_acc']:.4f}")
 
     if getattr(args, "check_path", None) is not None:
         check_dir = os.path.dirname(args.check_path)
         if check_dir:
             os.makedirs(check_dir, exist_ok=True)
         torch.save(model.state_dict(), args.check_path)
+
+    summary_path, history_path = resolve_unlearning_artifact_paths(
+        method="scrub",
+        results_path=results_path,
+        check_path=getattr(args, "check_path", None),
+        summary_path=getattr(args, "summary_path", None),
+        history_path=getattr(args, "history_path", None),
+    )
 
     history = {
         "epoch_list": epoch_list,
@@ -209,7 +234,46 @@ def scrub(loaders, args):
         "vf_accs": vf_accs,
         "best_epoch": best_epoch,
         "selected_acc": selected_acc,
+        "baseline_acc": baseline_acc,
+        "final_acc": final_acc,
+        "test_acc": selected_acc["test_acc"],
+        "selection_strategy": "best_valid_tradeoff",
+        "summary_path": summary_path,
+        "history_csv_path": history_path,
     }
+
+    summary = build_unlearning_summary(
+        method="scrub",
+        baseline_metrics=baseline_acc,
+        final_metrics=final_acc,
+        selected_metrics=selected_acc,
+        selected_epoch=best_epoch,
+        selection_strategy="best_valid_tradeoff",
+        history_rows=epoch_metrics,
+        loaders=loaders,
+        run_config={
+            "dataset": args.dataset,
+            "seed": int(args.seed),
+            "split_protocol": str(getattr(args, "split_protocol", "targeted_random")),
+            "forget_fraction": float(getattr(args, "forget_fraction", 0.0)),
+            "batch_size": int(getattr(args, "batch_size", 64)),
+        },
+        artifacts={
+            "checkpoint_path": getattr(args, "check_path", None),
+            "results_path": results_path,
+            "summary_path": summary_path,
+            "history_path": history_path,
+        },
+        extra={
+            "forget_class": forget_class,
+            "retain_weight": retain_weight,
+            "forget_weight": forget_weight,
+            "unlearn_epochs": unlearn_runs,
+        },
+    )
+    save_unlearning_summary(summary_path, summary)
+    save_unlearning_history_csv(history_path, epoch_metrics)
+    history["summary"] = summary
 
     return model, history
 

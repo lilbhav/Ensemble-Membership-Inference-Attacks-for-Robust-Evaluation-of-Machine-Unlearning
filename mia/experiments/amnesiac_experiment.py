@@ -33,6 +33,13 @@ from utils.splits import (
     ensure_fully_random_unlearning_split,
 )
 from utils.transfer_setup import ensure_cifar10_from_cifar100_transfer_checkpoint
+from utils.unlearning_results import (
+    build_epoch_record,
+    build_unlearning_summary,
+    resolve_unlearning_artifact_paths,
+    save_unlearning_history_csv,
+    save_unlearning_summary,
+)
 try:
     from Third_Party_Code.MachineUnlearning.unlearn_strategies import strategies as third_party_strategies
 except ModuleNotFoundError:
@@ -69,6 +76,8 @@ class AmnesiacInput:
     transfer_finetune_learning_rate: float = 0.001
     rebuild_transfer_checkpoint: bool = False
     split_protocol: str = "fully_random"
+    summary_path: Optional[str] = None
+    history_path: Optional[str] = None
 
 
 def _set_global_determinism(seed: int) -> None:
@@ -139,9 +148,11 @@ def amnesiac(loaders: Dict[str, DataLoader], args: AmnesiacInput):
     )
 
     baseline_acc = _evaluate_all(model, loaders, device)
+    baseline_acc["test_acc"] = compute_accuracy(model, loaders["test_loader"], device)
     if args.print_accuracies:
         line = log_accuracies(args.results_path, "baseline", baseline_acc)
         print(f"   {line}")
+        print(f"   baseline | test_acc: {baseline_acc['test_acc']:.4f}")
 
     strategy_args = argparse.Namespace()
     num_channels = int(next(iter(loaders["train_retain_loader"]))[0].shape[1])
@@ -152,6 +163,8 @@ def amnesiac(loaders: Dict[str, DataLoader], args: AmnesiacInput):
     tf_accs = []
     vr_accs = []
     vf_accs = []
+    epoch_metrics = []
+    final_acc = dict(baseline_acc)
 
     for epoch in range(1, int(args.unlearn_epochs) + 1):
         model = third_party_strategies.amnesiac(
@@ -175,6 +188,8 @@ def amnesiac(loaders: Dict[str, DataLoader], args: AmnesiacInput):
         tf_accs.append(acc_dict["tf_acc"])
         vr_accs.append(acc_dict["vr_acc"])
         vf_accs.append(acc_dict["vf_acc"])
+        epoch_metrics.append(build_epoch_record(epoch, acc_dict))
+        final_acc = dict(acc_dict)
 
         print(
             "[Amnesiac third-party {}/{}] tr={:.4f} tf={:.4f} vr={:.4f} vf={:.4f}".format(
@@ -192,8 +207,11 @@ def amnesiac(loaders: Dict[str, DataLoader], args: AmnesiacInput):
             print(f"   {line}")
 
     test_acc = compute_accuracy(model, loaders["test_loader"], device)
+    final_acc["test_acc"] = test_acc
 
     if args.print_accuracies:
+        line = log_accuracies(args.results_path, "final", final_acc)
+        print(f"   {line}")
         print(f"   final | test_acc: {test_acc:.4f}")
 
     if args.check_path is not None:
@@ -201,6 +219,14 @@ def amnesiac(loaders: Dict[str, DataLoader], args: AmnesiacInput):
         if check_dir:
             os.makedirs(check_dir, exist_ok=True)
         torch.save(model.state_dict(), args.check_path)
+
+    summary_path, history_path = resolve_unlearning_artifact_paths(
+        method="amnesiac",
+        results_path=args.results_path,
+        check_path=args.check_path,
+        summary_path=args.summary_path,
+        history_path=args.history_path,
+    )
 
     history = {
         "epoch_list": epoch_list,
@@ -210,7 +236,45 @@ def amnesiac(loaders: Dict[str, DataLoader], args: AmnesiacInput):
         "vf_accs": vf_accs,
         "test_acc": test_acc,
         "forget_class": forget_class,
+        "baseline_acc": baseline_acc,
+        "final_acc": final_acc,
+        "selected_acc": final_acc,
+        "best_epoch": epoch_list[-1] if epoch_list else None,
+        "selection_strategy": "last_epoch",
+        "summary_path": summary_path,
+        "history_csv_path": history_path,
     }
+
+    summary = build_unlearning_summary(
+        method="amnesiac",
+        baseline_metrics=baseline_acc,
+        final_metrics=final_acc,
+        selected_metrics=final_acc,
+        selected_epoch=history["best_epoch"],
+        selection_strategy="last_epoch",
+        history_rows=epoch_metrics,
+        loaders=loaders,
+        run_config={
+            "dataset": args.dataset,
+            "seed": int(args.seed),
+            "split_protocol": str(args.split_protocol),
+            "forget_fraction": float(args.forget_fraction),
+            "batch_size": int(args.batch_size),
+        },
+        artifacts={
+            "checkpoint_path": args.check_path,
+            "results_path": args.results_path,
+            "summary_path": summary_path,
+            "history_path": history_path,
+        },
+        extra={
+            "forget_class": forget_class,
+            "unlearn_epochs": int(args.unlearn_epochs),
+        },
+    )
+    save_unlearning_summary(summary_path, summary)
+    save_unlearning_history_csv(history_path, epoch_metrics)
+    history["summary"] = summary
 
     return model, history
 
@@ -376,10 +440,11 @@ def main():
     model, history = amnesiac(loaders, args)
 
     print("\nAmnesiac unlearning completed")
-    if history["vr_accs"]:
-        print(f"Final valid retain acc: {history['vr_accs'][-1]:.4f}")
-    if history["vf_accs"]:
-        print(f"Final valid forget acc: {history['vf_accs'][-1]:.4f}")
+    selected_acc = history.get("selected_acc", {})
+    if selected_acc.get("vr_acc") is not None:
+        print(f"Final valid retain acc: {selected_acc['vr_acc']:.4f}")
+    if selected_acc.get("vf_acc") is not None:
+        print(f"Final valid forget acc: {selected_acc['vf_acc']:.4f}")
     print(f"Final test acc: {history['test_acc']:.4f}")
 
     return model, history

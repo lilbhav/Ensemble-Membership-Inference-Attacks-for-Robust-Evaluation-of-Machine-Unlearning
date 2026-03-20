@@ -17,7 +17,7 @@ model:
   checkpoint_path: "./checkpoints/full_model.pt"
 
 unlearning:
-  method: "scrub"   # [fine_tune, grad_ascent, scrub, ssd, bad_teacher, amnesiac]
+  method: "scrub"   # [scrub, ssd, bad_teacher, amnesiac]
   checkpoint_path: "/content/gdrive/My Drive/mia_checkpoints/scrub_unlearned_model.pt"
   params:
     split_protocol: "targeted_random"
@@ -80,25 +80,6 @@ unlearning:
   #   forget_threshold: 1.5
   #   min_layer: -1
   #   max_layer: -1
-
-  # method: "fine_tune"
-  # checkpoint_path: "/content/gdrive/My Drive/mia_checkpoints/finetune_unlearned_model.pt"
-  # params:
-  #   lr: 0.00005
-  #   unlearn_epochs: 5
-  #   with_l1: true
-  #   alpha: 0.00005
-  #   no_l1_epochs: 2
-
-  # method: "grad_ascent"
-  # checkpoint_path: "/content/gdrive/My Drive/mia_checkpoints/grad_ascent_unlearned_model.pt"
-  # params:
-  #   # Third-party FT baseline options: gradient_ascent, gradient_ascent_descent, gradient_ascent_kl
-  #   unlearn_method: "gradient_ascent_descent"
-  #   num_epochs: 3
-  #   lr: 0.00005
-  #   train_batch_size: 32
-  #   eval_batch_size: 32
 
 mia:
   evaluation_target: "forget_vs_test"  # primary objective: detect unlearning failures

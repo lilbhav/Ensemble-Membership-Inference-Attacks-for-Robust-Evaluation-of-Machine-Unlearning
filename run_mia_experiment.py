@@ -7,7 +7,7 @@ Supports any combination of attacks and unlearning algorithms.
 Usage:
     python run_mia_experiment.py --config configs/scrub_experiment.yaml
     python run_mia_experiment.py --config configs/experiment.yaml --output results/my_experiment
-    python run_mia_experiment.py --config configs/finetune_experiment.yaml --attacks calibration yeom
+    python run_mia_experiment.py --config configs/scrub_experiment.yaml --attacks calibration yeom
 """
 
 import os
@@ -708,7 +708,6 @@ Examples:
   python run_mia_experiment.py --config configs/scrub_experiment.yaml --attacks calibration yeom
   
   # Run all unlearning methods on same dataset
-  python run_mia_experiment.py --config configs/finetune_experiment.yaml -o results/finetune
   python run_mia_experiment.py --config configs/scrub_experiment.yaml -o results/scrub
   python run_mia_experiment.py --config configs/ssd_experiment.yaml -o results/ssd
     python run_mia_experiment.py --config configs/bad_teacher_experiment.yaml -o results/bad_teacher

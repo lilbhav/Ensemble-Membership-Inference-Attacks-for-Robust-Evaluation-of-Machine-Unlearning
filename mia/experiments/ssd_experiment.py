@@ -28,6 +28,13 @@ from data.loaders import load_dataset, get_num_classes
 from utils.splits import ensure_retain_forget_split, ensure_targeted_random_unlearning_split, ensure_fully_random_unlearning_split
 from utils.metrics import compute_accuracy, log_accuracies
 from utils.transfer_setup import ensure_cifar10_from_cifar100_transfer_checkpoint
+from utils.unlearning_results import (
+    build_epoch_record,
+    build_unlearning_summary,
+    resolve_unlearning_artifact_paths,
+    save_unlearning_history_csv,
+    save_unlearning_summary,
+)
 
 # Third-party strategy import (delegate algorithm implementation here)
 try:
@@ -73,6 +80,8 @@ class SSDInput:
     rebuild_transfer_checkpoint: bool = False
     split_protocol: str = "fully_random"
     unlearn_epochs: int = 1
+    summary_path: Optional[str] = None
+    history_path: Optional[str] = None
 
 
 def train_validation(
@@ -146,6 +155,7 @@ def ssd(loaders: Dict[str, DataLoader], args: SSDInput):
         device,
     )
     baseline_test_acc = compute_accuracy(model, test_loader, device)
+    baseline_acc["test_acc"] = baseline_test_acc
     print(
         "Baseline retain acc - train: {:.4f}, valid: {:.4f}".format(
             baseline_acc["tr_acc"], baseline_acc["vr_acc"]
@@ -187,6 +197,8 @@ def ssd(loaders: Dict[str, DataLoader], args: SSDInput):
         return current_model
 
     runs = int(getattr(args, "unlearn_epochs", 1))
+    epoch_metrics = []
+    final_acc = dict(baseline_acc)
     for epoch in range(1, runs + 1):
         model = _run_ssd_with_config(model)
 
@@ -208,6 +220,8 @@ def ssd(loaders: Dict[str, DataLoader], args: SSDInput):
                 acc_epoch["vf_acc"],
             )
         )
+        epoch_metrics.append(build_epoch_record(epoch, acc_epoch))
+        final_acc = dict(acc_epoch)
         if args.print_accuracies:
             line = log_accuracies(args.results_path, f"epoch {epoch}", acc_epoch)
             print(f"   {line}")
@@ -222,11 +236,12 @@ def ssd(loaders: Dict[str, DataLoader], args: SSDInput):
     )
     after_test_acc = compute_accuracy(model, test_loader, device)
     acc_dict["test_acc"] = after_test_acc
+    final_acc = dict(acc_dict)
 
     if args.print_accuracies:
-        line = log_accuracies(args.results_path, "after_ssd", acc_dict)
+        line = log_accuracies(args.results_path, "final", acc_dict)
         print(f"   {line}")
-        print(f"   after_ssd | test_acc: {after_test_acc:.4f}")
+        print(f"   final | test_acc: {after_test_acc:.4f}")
 
     if args.check_path is not None:
         check_dir = os.path.dirname(args.check_path)
@@ -234,7 +249,65 @@ def ssd(loaders: Dict[str, DataLoader], args: SSDInput):
             os.makedirs(check_dir, exist_ok=True)
         torch.save(model.state_dict(), args.check_path)
 
-    return model, acc_dict
+    summary_path, history_path = resolve_unlearning_artifact_paths(
+        method="ssd",
+        results_path=args.results_path,
+        check_path=args.check_path,
+        summary_path=args.summary_path,
+        history_path=args.history_path,
+    )
+
+    history = {
+        "epoch_list": [row["epoch"] for row in epoch_metrics],
+        "tr_accs": [row.get("tr_acc") for row in epoch_metrics],
+        "tf_accs": [row.get("tf_acc") for row in epoch_metrics],
+        "vr_accs": [row.get("vr_acc") for row in epoch_metrics],
+        "vf_accs": [row.get("vf_acc") for row in epoch_metrics],
+        "baseline_acc": baseline_acc,
+        "final_acc": final_acc,
+        "selected_acc": final_acc,
+        "best_epoch": epoch_metrics[-1]["epoch"] if epoch_metrics else None,
+        "selection_strategy": "last_epoch",
+        "test_acc": after_test_acc,
+        "forget_class": forget_class,
+        "summary_path": summary_path,
+        "history_csv_path": history_path,
+    }
+
+    summary = build_unlearning_summary(
+        method="ssd",
+        baseline_metrics=baseline_acc,
+        final_metrics=final_acc,
+        selected_metrics=final_acc,
+        selected_epoch=history["best_epoch"],
+        selection_strategy="last_epoch",
+        history_rows=epoch_metrics,
+        loaders=loaders,
+        run_config={
+            "dataset": args.dataset,
+            "seed": int(args.seed),
+            "split_protocol": str(args.split_protocol),
+            "forget_fraction": float(args.forget_fraction),
+            "batch_size": int(args.batch_size),
+        },
+        artifacts={
+            "checkpoint_path": args.check_path,
+            "results_path": args.results_path,
+            "summary_path": summary_path,
+            "history_path": history_path,
+        },
+        extra={
+            "forget_class": forget_class,
+            "unlearn_epochs": runs,
+            "dampening_constant": float(getattr(args, "dampening_constant", 1.0)),
+            "selection_weighting": float(getattr(args, "selection_weighting", 10.0)),
+        },
+    )
+    save_unlearning_summary(summary_path, summary)
+    save_unlearning_history_csv(history_path, epoch_metrics)
+    history["summary"] = summary
+
+    return model, history
 
 
 def _create_loaders(args: SSDInput):
@@ -447,17 +520,18 @@ def main():
     loaders = _create_loaders(args)
 
     print("Running SSD unlearning...")
-    model, acc_dict = ssd(loaders, args)
+    model, history = ssd(loaders, args)
 
     if args.print_accuracies:
-        print(f"   tr_acc: {acc_dict['tr_acc']:.4f}")
-        print(f"   tf_acc: {acc_dict['tf_acc']:.4f}")
-        print(f"   vr_acc: {acc_dict['vr_acc']:.4f}")
-        print(f"   vf_acc: {acc_dict['vf_acc']:.4f}")
-        if "test_acc" in acc_dict:
-            print(f"   test_acc: {acc_dict['test_acc']:.4f}")
+        selected_acc = history.get("selected_acc", {})
+        print(f"   tr_acc: {selected_acc['tr_acc']:.4f}")
+        print(f"   tf_acc: {selected_acc['tf_acc']:.4f}")
+        print(f"   vr_acc: {selected_acc['vr_acc']:.4f}")
+        print(f"   vf_acc: {selected_acc['vf_acc']:.4f}")
+        if selected_acc.get("test_acc") is not None:
+            print(f"   test_acc: {selected_acc['test_acc']:.4f}")
 
-    return model, acc_dict
+    return model, history
 
 
 if __name__ == "__main__":
