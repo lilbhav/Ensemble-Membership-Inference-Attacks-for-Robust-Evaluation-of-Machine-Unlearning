@@ -29,16 +29,17 @@ results_path: /content/gdrive/My Drive/mia_checkpoints/bad_teacher_results.txt
 print_accuracies: true
 
 # Bad Teacher hyperparameters
-learning_rate: 0.00005
-unlearn_epochs: 3
+learning_rate: 0.0001
+unlearn_epochs: 4
 teacher_retain_epochs: 1
-retain_subset_fraction: 0.6
+blindspot_epochs: 2
+retain_subset_fraction: 0.35
 unlearning_batch_size: 128
-kl_temperature: 2.0
+kl_temperature: 1.0
 
 # Checkpoint selection rule in wrapper:
 # pick minimum vf_acc subject to vr_acc >= baseline_vr_acc - selection_delta.
-selection_delta: 0.10
+selection_delta: 0.08
 
 eval_every: 1
 device: null

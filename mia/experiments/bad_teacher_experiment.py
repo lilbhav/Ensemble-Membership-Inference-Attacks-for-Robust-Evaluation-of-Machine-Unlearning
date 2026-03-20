@@ -74,6 +74,7 @@ class BadTeacherInput:
     device: Optional[str] = None
     results_path: Optional[str] = None
     teacher_retain_epochs: int = 1
+    blindspot_epochs: int = 1
     retain_subset_fraction: float = 0.3
     unlearning_batch_size: int = 256
     kl_temperature: float = 1.0
@@ -236,7 +237,7 @@ def bad_teacher(loaders: Dict[str, DataLoader], args: BadTeacherInput):
             full_trained_teacher=current_model,
             retain_data=retain_train_subset,
             forget_data=loaders["train_forget_loader"].dataset,
-            epochs=1,
+            epochs=int(getattr(args, "blindspot_epochs", 1)),
             optimizer=optimizer,
             lr=float(args.learning_rate),
             batch_size=int(getattr(args, "unlearning_batch_size", 256)),
@@ -396,6 +397,7 @@ def bad_teacher(loaders: Dict[str, DataLoader], args: BadTeacherInput):
         extra={
             "forget_class": forget_class,
             "teacher_retain_epochs": int(args.teacher_retain_epochs),
+            "blindspot_epochs": int(getattr(args, "blindspot_epochs", 1)),
             "unlearn_epochs": int(args.unlearn_epochs),
             "retain_subset_fraction": float(getattr(args, "retain_subset_fraction", 0.3)),
             "unlearning_batch_size": int(getattr(args, "unlearning_batch_size", 256)),
