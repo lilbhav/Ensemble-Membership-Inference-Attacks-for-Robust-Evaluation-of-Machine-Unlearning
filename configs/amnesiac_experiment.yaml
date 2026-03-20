@@ -8,7 +8,7 @@ num_workers: 2
 pin_memory: true
 
 # Transfer setup: pretrain on CIFAR-100, replace final layer, fine-tune on CIFAR-10.
-source_checkpoint_cifar100: /content/gdrive/My Drive/mia_checkpoints/pretrained_cifar100.pt
+source_checkpoint_cifar100: /content/gdrive/My Drive/mia_checkpoints/pretrained_cifar10.pt
 model_path: /content/gdrive/My Drive/mia_checkpoints/finetuned_cifar10_from_cifar100.pt
 transfer_finetune_epochs: 10
 transfer_finetune_batch_size: 128
