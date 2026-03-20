@@ -7,6 +7,7 @@ import os
 import sys
 import random
 import argparse
+from types import SimpleNamespace
 from dataclasses import dataclass
 from typing import Dict, Optional
 
@@ -185,6 +186,12 @@ def bad_teacher(loaders: Dict[str, DataLoader], args: BadTeacherInput):
     num_channels = int(next(iter(loaders["train_retain_loader"]))[0].shape[1])
     num_classes = int(get_num_classes(args.dataset))
 
+    # Third-party bad_teacher uses random.sample(retain_loader.dataset, ...), which
+    # requires a Sequence on Python 3.12. Adapt locally without editing third-party code.
+    retain_loader_for_third_party = SimpleNamespace(
+        dataset=list(loaders["train_retain_loader"].dataset)
+    )
+
     epoch_list = []
     tr_accs = []
     tf_accs = []
@@ -198,7 +205,7 @@ def bad_teacher(loaders: Dict[str, DataLoader], args: BadTeacherInput):
             unlearning_teacher=unlearning_teacher,
             unlearn_class=forget_class,
             unlearn_loader=loaders["train_forget_loader"],
-            retain_loader=loaders["train_retain_loader"],
+            retain_loader=retain_loader_for_third_party,
             test_loader=loaders["test_loader"],
             num_classes=num_classes,
             num_channels=num_channels,
