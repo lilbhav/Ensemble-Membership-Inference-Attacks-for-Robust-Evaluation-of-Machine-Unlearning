@@ -7,6 +7,7 @@ import os
 import sys
 import random
 import argparse
+import copy
 from dataclasses import dataclass
 from typing import Dict, Optional
 
