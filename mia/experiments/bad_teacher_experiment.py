@@ -33,7 +33,10 @@ from utils.splits import (
     ensure_fully_random_unlearning_split,
 )
 from utils.transfer_setup import ensure_cifar10_from_cifar100_transfer_checkpoint
-from Third_Party_Code.MachineUnlearning.unlearn_strategies import strategies as third_party_strategies
+try:
+    from Third_Party_Code.MachineUnlearning.unlearn_strategies import strategies as third_party_strategies
+except ModuleNotFoundError:
+    from unlearn_strategies import strategies as third_party_strategies  # type: ignore[import-not-found]
 
 
 @dataclass

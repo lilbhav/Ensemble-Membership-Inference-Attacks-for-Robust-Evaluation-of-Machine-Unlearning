@@ -30,7 +30,10 @@ from utils.metrics import compute_accuracy, log_accuracies
 from utils.transfer_setup import ensure_cifar10_from_cifar100_transfer_checkpoint
 
 # Third-party strategy import (delegate algorithm implementation here)
-from Third_Party_Code.MachineUnlearning.unlearn_strategies import strategies as third_party_strategies
+try:
+    from Third_Party_Code.MachineUnlearning.unlearn_strategies import strategies as third_party_strategies
+except ModuleNotFoundError:
+    from unlearn_strategies import strategies as third_party_strategies  # type: ignore[import-not-found]
 
 
 @dataclass
