@@ -29,8 +29,15 @@ results_path: /content/gdrive/My Drive/mia_checkpoints/amnesiac_results.txt
 print_accuracies: true
 
 # Amnesiac hyperparameters
-learning_rate: 0.001
-unlearn_epochs: 1
+learning_rate: 0.0001
+unlearn_epochs: 3
+amnesiac_train_epochs: 2
+unlearning_batch_size: 128
+optimizer_type: adam
+
+# Wrapper-level checkpoint selection:
+# choose minimum vf_acc subject to vr_acc >= baseline_vr_acc - selection_delta.
+selection_delta: 0.08
 
 eval_every: 1
 device: null

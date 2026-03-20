@@ -42,6 +42,15 @@ try:
 except ModuleNotFoundError:
     from unlearn_strategies import strategies as third_party_strategies  # type: ignore[import-not-found]
 
+try:
+    from Third_Party_Code.MachineUnlearning.unlearn_strategies.unlearn import (
+        DistillKL,
+        adjust_learning_rate,
+        train_distill,
+    )
+except ModuleNotFoundError:
+    from unlearn_strategies.unlearn import DistillKL, adjust_learning_rate, train_distill  # type: ignore[import-not-found]
+
 
 def set_global_determinism(seed: int) -> None:
     """Set deterministic seeds for reproducible dataset splits and training order."""
@@ -83,6 +92,94 @@ def _infer_forget_class(forget_dataset) -> int:
     if not label_counts:
         return 0
     return max(label_counts.items(), key=lambda kv: kv[1])[0]
+
+
+def _run_scrub_with_config(
+    model: nn.Module,
+    unlearning_teacher: nn.Module,
+    train_forget_loader: DataLoader,
+    train_retain_loader: DataLoader,
+    args,
+) -> nn.Module:
+    gamma = float(getattr(args, "gamma", 0.99))
+    alpha = float(getattr(args, "alpha", 0.001))
+    beta = float(getattr(args, "beta", 0.0))
+    msteps = int(getattr(args, "msteps", 2))
+    kd_T = float(getattr(args, "kd_T", 4.0))
+
+    sgda_epochs = int(getattr(args, "sgda_epochs", 3))
+    sgda_learning_rate = float(getattr(args, "sgda_learning_rate", 0.0005))
+    lr_decay_epochs = getattr(args, "lr_decay_epochs", [3, 5, 9])
+    if not isinstance(lr_decay_epochs, (list, tuple)):
+        lr_decay_epochs = [3, 5, 9]
+    lr_decay_epochs = [int(v) for v in lr_decay_epochs]
+    lr_decay_rate = float(getattr(args, "lr_decay_rate", 0.1))
+    sgda_weight_decay = float(getattr(args, "sgda_weight_decay", 5e-4))
+    sgda_momentum = float(getattr(args, "sgda_momentum", 0.9))
+
+    model_t = copy.deepcopy(unlearning_teacher)
+    model_s = copy.deepcopy(model)
+
+    module_list = nn.ModuleList([model_s])
+    trainable_list = nn.ModuleList([model_s])
+
+    criterion_list = nn.ModuleList([
+        nn.CrossEntropyLoss(),
+        DistillKL(kd_T),
+        DistillKL(kd_T),
+    ])
+
+    optimizer = torch.optim.SGD(
+        trainable_list.parameters(),
+        lr=sgda_learning_rate,
+        momentum=sgda_momentum,
+        weight_decay=sgda_weight_decay,
+    )
+
+    module_list.append(model_t)
+
+    if torch.cuda.is_available():
+        module_list.cuda()
+        criterion_list.cuda()
+
+    for epoch in range(1, sgda_epochs + 1):
+        adjust_learning_rate(
+            epoch=epoch,
+            optimizer=optimizer,
+            lr_decay_epochs=lr_decay_epochs,
+            sgda_learning_rate=sgda_learning_rate,
+            lr_decay_rate=lr_decay_rate,
+        )
+
+        if epoch <= msteps:
+            train_distill(
+                epoch=epoch,
+                train_loader=train_forget_loader,
+                module_list=module_list,
+                swa_model=None,
+                criterion_list=criterion_list,
+                optimizer=optimizer,
+                gamma=gamma,
+                alpha=alpha,
+                beta=beta,
+                split="maximize",
+            )
+
+        train_distill(
+            epoch=epoch,
+            train_loader=train_retain_loader,
+            module_list=module_list,
+            swa_model=None,
+            criterion_list=criterion_list,
+            optimizer=optimizer,
+            gamma=gamma,
+            alpha=alpha,
+            beta=beta,
+            split="minimize",
+            quiet=True,
+        )
+
+    return model_s
 
 
 def scrub(loaders, args):
@@ -130,9 +227,8 @@ def scrub(loaders, args):
     num_classes = int(get_num_classes(args.dataset))
     num_channels = int(next(iter(train_retain_loader))[0].shape[1])
 
-    # Keep algorithm execution in third-party code; wrapper only controls run count and evaluation.
+    # Keep algorithm implementation in wrapper-first code so third-party files remain untouched.
     unlearn_runs = int(getattr(args, "unlearn_epochs", 1))
-    strategy_args = argparse.Namespace()
     unlearning_teacher = copy.deepcopy(model)
 
     tr_accs, tf_accs, vr_accs, vf_accs, epoch_list = [], [], [], [], []
@@ -147,17 +243,12 @@ def scrub(loaders, args):
     forget_weight = float(getattr(args, "forget_weight", 1.0))
 
     for epoch in range(1, unlearn_runs + 1):
-        model = third_party_strategies.scrub(
-            args=strategy_args,
+        model = _run_scrub_with_config(
             model=model,
             unlearning_teacher=unlearning_teacher,
-            unlearn_class=forget_class,
-            unlearn_loader=train_forget_loader,
-            retain_loader=train_retain_loader,
-            test_loader=test_loader,
-            num_classes=num_classes,
-            num_channels=num_channels,
-            device=device,
+            train_forget_loader=train_forget_loader,
+            train_retain_loader=train_retain_loader,
+            args=args,
         )
 
         model.eval()

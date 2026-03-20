@@ -7,6 +7,7 @@ import os
 import sys
 import random
 import argparse
+import copy
 from types import SimpleNamespace
 from dataclasses import dataclass
 from typing import Dict, Optional
@@ -48,6 +49,11 @@ try:
 except ModuleNotFoundError:
     from unlearn_strategies import strategies as third_party_strategies  # type: ignore[import-not-found]
 
+try:
+    from Third_Party_Code.MachineUnlearning.unlearn_strategies import unlearn as third_party_unlearn
+except ModuleNotFoundError:
+    from unlearn_strategies import unlearn as third_party_unlearn  # type: ignore[import-not-found]
+
 
 @dataclass
 class BadTeacherInput:
@@ -85,6 +91,7 @@ class BadTeacherInput:
     split_protocol: str = "fully_random"
     summary_path: Optional[str] = None
     history_path: Optional[str] = None
+    selection_delta: float = 0.0
 
 
 def _set_global_determinism(seed: int) -> None:
@@ -195,10 +202,6 @@ def bad_teacher(loaders: Dict[str, DataLoader], args: BadTeacherInput):
         loaders["train_forget_loader"].dataset
     )
 
-    strategy_args = argparse.Namespace()
-    num_channels = int(next(iter(loaders["train_retain_loader"]))[0].shape[1])
-    num_classes = int(get_num_classes(args.dataset))
-
     # Third-party bad_teacher uses random.sample(retain_loader.dataset, ...), which
     # requires a Sequence on Python 3.12. Adapt locally without editing third-party code.
     retain_loader_for_third_party = SimpleNamespace(
@@ -206,6 +209,9 @@ def bad_teacher(loaders: Dict[str, DataLoader], args: BadTeacherInput):
     )
 
     _baseline_state = {k: v.clone() for k, v in model.state_dict().items()}
+    selection_delta = float(getattr(args, "selection_delta", 0.0))
+    min_vr_for_selection = float(baseline_acc["vr_acc"]) - selection_delta
+    epoch_state_snapshots = []
     epoch_list = []
     tr_accs = []
     tf_accs = []
@@ -214,19 +220,33 @@ def bad_teacher(loaders: Dict[str, DataLoader], args: BadTeacherInput):
     epoch_metrics = []
     final_acc = dict(baseline_acc)
 
-    for epoch in range(1, int(args.unlearn_epochs) + 1):
-        model = third_party_strategies.bad_teacher(
-            args=strategy_args,
-            model=model,
+    def _run_bad_teacher_with_config(current_model: nn.Module) -> nn.Module:
+        student_model = copy.deepcopy(current_model)
+        optimizer = torch.optim.Adam(student_model.parameters(), lr=float(args.learning_rate))
+
+        retain_dataset = list(retain_loader_for_third_party.dataset)
+        retain_fraction = float(getattr(args, "retain_subset_fraction", 0.3))
+        retain_fraction = max(0.05, min(1.0, retain_fraction))
+        subset_size = max(1, int(retain_fraction * len(retain_dataset)))
+        retain_train_subset = random.sample(retain_dataset, subset_size)
+
+        third_party_unlearn.blindspot_unlearner(
+            model=student_model,
             unlearning_teacher=unlearning_teacher,
-            unlearn_class=forget_class,
-            unlearn_loader=loaders["train_forget_loader"],
-            retain_loader=retain_loader_for_third_party,
-            test_loader=loaders["test_loader"],
-            num_classes=num_classes,
-            num_channels=num_channels,
+            full_trained_teacher=current_model,
+            retain_data=retain_train_subset,
+            forget_data=loaders["train_forget_loader"].dataset,
+            epochs=1,
+            optimizer=optimizer,
+            lr=float(args.learning_rate),
+            batch_size=int(getattr(args, "unlearning_batch_size", 256)),
             device=device,
+            KL_temperature=float(getattr(args, "kl_temperature", 1.0)),
         )
+        return student_model
+
+    for epoch in range(1, int(args.unlearn_epochs) + 1):
+        model = _run_bad_teacher_with_config(model)
 
         model.eval()
         acc_dict = _evaluate_all(model, loaders, device)
@@ -237,6 +257,16 @@ def bad_teacher(loaders: Dict[str, DataLoader], args: BadTeacherInput):
         vr_accs.append(acc_dict["vr_acc"])
         vf_accs.append(acc_dict["vf_acc"])
         epoch_metrics.append(build_epoch_record(epoch, acc_dict))
+        epoch_state_snapshots.append(
+            {
+                "epoch": epoch,
+                "acc": dict(acc_dict),
+                "state_dict": {
+                    name: tensor.detach().cpu().clone()
+                    for name, tensor in model.state_dict().items()
+                },
+            }
+        )
         final_acc = dict(acc_dict)
 
         print(
@@ -254,17 +284,64 @@ def bad_teacher(loaders: Dict[str, DataLoader], args: BadTeacherInput):
             line = log_accuracies(args.results_path, f"epoch {epoch}", acc_dict)
             print(f"   {line}")
 
+    if epoch_state_snapshots:
+        feasible_candidates = [
+            candidate
+            for candidate in epoch_state_snapshots
+            if float(candidate["acc"]["vr_acc"]) >= min_vr_for_selection
+        ]
+        used_constraint = True
+        if not feasible_candidates:
+            feasible_candidates = list(epoch_state_snapshots)
+            used_constraint = False
+            print(
+                "[BadTeacher] No checkpoint satisfied vr_acc >= {:.4f}; "
+                "falling back to lowest vf_acc across all checkpoints.".format(min_vr_for_selection)
+            )
+
+        selected_candidate = min(
+            feasible_candidates,
+            key=lambda candidate: (
+                float(candidate["acc"]["vf_acc"]),
+                -float(candidate["acc"]["vr_acc"]),
+                int(candidate["epoch"]),
+            ),
+        )
+        selected_epoch = int(selected_candidate["epoch"])
+        selected_state_dict = selected_candidate["state_dict"]
+    else:
+        selected_epoch = None
+        selected_state_dict = {
+            name: tensor.detach().cpu().clone() for name, tensor in model.state_dict().items()
+        }
+        used_constraint = True
+
+    model.load_state_dict(selected_state_dict)
+    model = model.to(device)
+    model.eval()
+
     report_weight_diff(_baseline_state, model.state_dict(), "BadTeacher")
 
     model.eval()
+    final_test_metrics = evaluate_split_metrics(model, loaders["test_loader"], device, "test")
+    final_acc.update(final_test_metrics)
+
+    selected_acc = _evaluate_all(model, loaders, device)
     test_metrics = evaluate_split_metrics(model, loaders["test_loader"], device, "test")
     test_acc = float(test_metrics["test_acc"])
-    final_acc.update(test_metrics)
+    selected_acc.update(test_metrics)
 
     if args.print_accuracies:
         line = log_accuracies(args.results_path, "final", final_acc)
         print(f"   {line}")
-        print(f"   final | test_acc: {test_acc:.4f}")
+        print(f"   final | test_acc: {float(final_acc['test_acc']):.4f}")
+        selected_line = log_accuracies(
+            args.results_path,
+            f"selected_epoch {selected_epoch if selected_epoch is not None else 'baseline'}",
+            selected_acc,
+        )
+        print(f"   {selected_line}")
+        print(f"   selected | test_acc: {test_acc:.4f}")
 
     if args.check_path is not None:
         check_dir = os.path.dirname(args.check_path)
@@ -290,9 +367,12 @@ def bad_teacher(loaders: Dict[str, DataLoader], args: BadTeacherInput):
         "test_acc": test_acc,
         "baseline_acc": baseline_acc,
         "final_acc": final_acc,
-        "selected_acc": final_acc,
-        "best_epoch": epoch_list[-1] if epoch_list else None,
-        "selection_strategy": "last_epoch",
+        "selected_acc": selected_acc,
+        "best_epoch": selected_epoch,
+        "selection_strategy": "min_vf_subject_to_vr_floor",
+        "selection_vr_floor": min_vr_for_selection,
+        "selection_delta": selection_delta,
+        "selection_constraint_satisfied": used_constraint,
         "summary_path": summary_path,
         "history_csv_path": history_path,
     }
@@ -301,9 +381,9 @@ def bad_teacher(loaders: Dict[str, DataLoader], args: BadTeacherInput):
         method="bad_teacher",
         baseline_metrics=baseline_acc,
         final_metrics=final_acc,
-        selected_metrics=final_acc,
+        selected_metrics=selected_acc,
         selected_epoch=history["best_epoch"],
-        selection_strategy="last_epoch",
+        selection_strategy="min_vf_subject_to_vr_floor",
         history_rows=epoch_metrics,
         loaders=loaders,
         run_config=to_serializable_dict(args),
@@ -317,6 +397,12 @@ def bad_teacher(loaders: Dict[str, DataLoader], args: BadTeacherInput):
             "forget_class": forget_class,
             "teacher_retain_epochs": int(args.teacher_retain_epochs),
             "unlearn_epochs": int(args.unlearn_epochs),
+            "retain_subset_fraction": float(getattr(args, "retain_subset_fraction", 0.3)),
+            "unlearning_batch_size": int(getattr(args, "unlearning_batch_size", 256)),
+            "kl_temperature": float(getattr(args, "kl_temperature", 1.0)),
+            "selection_delta": selection_delta,
+            "selection_vr_floor": min_vr_for_selection,
+            "selection_constraint_satisfied": used_constraint,
         },
     )
     save_unlearning_summary(summary_path, summary)

@@ -26,7 +26,7 @@ if TP_MACHINEUNLEARNING_ROOT not in sys.path:
     sys.path.insert(0, TP_MACHINEUNLEARNING_ROOT)
 
 from data.loaders import load_dataset, get_num_classes
-from utils.metrics import evaluate_split_metrics, log_accuracies
+from utils.metrics import evaluate_split_metrics, log_accuracies, report_weight_diff
 from utils.splits import (
     ensure_retain_forget_split,
     ensure_targeted_random_unlearning_split,
@@ -80,6 +80,10 @@ class AmnesiacInput:
     split_protocol: str = "fully_random"
     summary_path: Optional[str] = None
     history_path: Optional[str] = None
+    amnesiac_train_epochs: int = 5
+    unlearning_batch_size: int = 128
+    optimizer_type: str = "adam"
+    selection_delta: float = 0.0
 
 
 def _set_global_determinism(seed: int) -> None:
@@ -137,6 +141,71 @@ def _infer_forget_class(forget_dataset) -> int:
     return max(label_counts.items(), key=lambda kv: kv[1])[0]
 
 
+def _run_amnesiac_with_config(
+    model: nn.Module,
+    forget_loader: DataLoader,
+    retain_loader: DataLoader,
+    test_loader: DataLoader,
+    forget_class: int,
+    num_classes: int,
+    device: torch.device,
+    args: AmnesiacInput,
+) -> nn.Module:
+    candidate_labels = list(range(num_classes))
+    candidate_labels.remove(forget_class)
+
+    unlearning_trainset = []
+    for x, _ in forget_loader.dataset:
+        unlearning_trainset.append((x, random.choice(candidate_labels)))
+    for x, y in retain_loader.dataset:
+        unlearning_trainset.append((x, y))
+
+    unlearning_train_loader = DataLoader(
+        unlearning_trainset,
+        batch_size=int(getattr(args, "unlearning_batch_size", 128)),
+        shuffle=True,
+        pin_memory=bool(getattr(args, "pin_memory", True)) and torch.cuda.is_available(),
+        num_workers=int(getattr(args, "num_workers", 2)),
+    )
+
+    trained_model = copy.deepcopy(model)
+    optimizer_name = str(getattr(args, "optimizer_type", "adam")).strip().lower()
+    learning_rate = float(getattr(args, "learning_rate", 1e-4))
+    if optimizer_name == "sgd":
+        optimizer = torch.optim.SGD(trained_model.parameters(), lr=learning_rate, momentum=0.5)
+    else:
+        optimizer = torch.optim.Adam(trained_model.parameters(), lr=learning_rate, weight_decay=1e-4)
+
+    criterion = nn.CrossEntropyLoss().to(device)
+    train_epochs = int(getattr(args, "amnesiac_train_epochs", 5))
+
+    for epoch in range(1, train_epochs + 1):
+        loss_values = []
+        trained_model.train()
+        for images, labels in unlearning_train_loader:
+            images = images.to(device)
+            labels = labels.long().to(device)
+
+            optimizer.zero_grad()
+            output = trained_model(images)
+            loss = criterion(output, labels)
+            loss.backward()
+            optimizer.step()
+            loss_values.append(float(loss.item()))
+
+        mean_loss = float(np.mean(np.array(loss_values))) if loss_values else 0.0
+        train_acc = _evaluate_all(trained_model, {
+            "train_retain_loader": retain_loader,
+            "train_forget_loader": forget_loader,
+            "valid_retain_loader": retain_loader,
+            "valid_forget_loader": forget_loader,
+        }, device)["tr_acc"]
+        test_acc = evaluate_split_metrics(trained_model, test_loader, device, "test")["test_acc"]
+        print(f"Epochs: {epoch} Train Loss: {mean_loss:.4f} Train Acc: {train_acc * 100:.4f} Test acc: {test_acc * 100:.4f}")
+
+    return trained_model
+
+
 def amnesiac(loaders: Dict[str, DataLoader], args: AmnesiacInput):
     device = (
         torch.device(args.device)
@@ -156,8 +225,6 @@ def amnesiac(loaders: Dict[str, DataLoader], args: AmnesiacInput):
         print(f"   {line}")
         print(f"   baseline | test_acc: {baseline_acc['test_acc']:.4f}")
 
-    strategy_args = argparse.Namespace()
-    num_channels = int(next(iter(loaders["train_retain_loader"]))[0].shape[1])
     num_classes = int(get_num_classes(args.dataset))
 
     epoch_list = []
@@ -167,19 +234,21 @@ def amnesiac(loaders: Dict[str, DataLoader], args: AmnesiacInput):
     vf_accs = []
     epoch_metrics = []
     final_acc = dict(baseline_acc)
+    selection_delta = float(getattr(args, "selection_delta", 0.0))
+    min_vr_for_selection = float(baseline_acc["vr_acc"]) - selection_delta
+    epoch_state_snapshots = []
+    _baseline_state = {k: v.clone() for k, v in model.state_dict().items()}
 
     for epoch in range(1, int(args.unlearn_epochs) + 1):
-        model = third_party_strategies.amnesiac(
-            args=strategy_args,
+        model = _run_amnesiac_with_config(
             model=model,
-            unlearning_teacher=_load_model(args.dataset, args.model_path, device),
-            unlearn_class=forget_class,
-            unlearn_loader=loaders["train_forget_loader"],
+            forget_loader=loaders["train_forget_loader"],
             retain_loader=loaders["train_retain_loader"],
             test_loader=loaders["test_loader"],
+            forget_class=forget_class,
             num_classes=num_classes,
-            num_channels=num_channels,
             device=device,
+            args=args,
         )
 
         model.eval()
@@ -191,6 +260,16 @@ def amnesiac(loaders: Dict[str, DataLoader], args: AmnesiacInput):
         vr_accs.append(acc_dict["vr_acc"])
         vf_accs.append(acc_dict["vf_acc"])
         epoch_metrics.append(build_epoch_record(epoch, acc_dict))
+        epoch_state_snapshots.append(
+            {
+                "epoch": epoch,
+                "acc": dict(acc_dict),
+                "state_dict": {
+                    name: tensor.detach().cpu().clone()
+                    for name, tensor in model.state_dict().items()
+                },
+            }
+        )
         final_acc = dict(acc_dict)
 
         print(
@@ -208,14 +287,61 @@ def amnesiac(loaders: Dict[str, DataLoader], args: AmnesiacInput):
             line = log_accuracies(args.results_path, f"epoch {epoch}", acc_dict)
             print(f"   {line}")
 
+    if epoch_state_snapshots:
+        feasible_candidates = [
+            candidate
+            for candidate in epoch_state_snapshots
+            if float(candidate["acc"]["vr_acc"]) >= min_vr_for_selection
+        ]
+        used_constraint = True
+        if not feasible_candidates:
+            feasible_candidates = list(epoch_state_snapshots)
+            used_constraint = False
+            print(
+                "[Amnesiac] No checkpoint satisfied vr_acc >= {:.4f}; "
+                "falling back to lowest vf_acc across all checkpoints.".format(min_vr_for_selection)
+            )
+
+        selected_candidate = min(
+            feasible_candidates,
+            key=lambda candidate: (
+                float(candidate["acc"]["vf_acc"]),
+                -float(candidate["acc"]["vr_acc"]),
+                int(candidate["epoch"]),
+            ),
+        )
+        selected_epoch = int(selected_candidate["epoch"])
+        selected_state_dict = selected_candidate["state_dict"]
+    else:
+        selected_epoch = None
+        selected_state_dict = {name: tensor.detach().cpu().clone() for name, tensor in model.state_dict().items()}
+        used_constraint = True
+
     test_metrics = evaluate_split_metrics(model, loaders["test_loader"], device, "test")
     test_acc = float(test_metrics["test_acc"])
     final_acc.update(test_metrics)
 
+    model.load_state_dict(selected_state_dict)
+    model = model.to(device)
+    model.eval()
+    report_weight_diff(_baseline_state, model.state_dict(), "Amnesiac")
+
+    selected_acc = _evaluate_all(model, loaders, device)
+    selected_test_metrics = evaluate_split_metrics(model, loaders["test_loader"], device, "test")
+    selected_acc.update(selected_test_metrics)
+    test_acc = float(selected_acc["test_acc"])
+
     if args.print_accuracies:
         line = log_accuracies(args.results_path, "final", final_acc)
         print(f"   {line}")
-        print(f"   final | test_acc: {test_acc:.4f}")
+        print(f"   final | test_acc: {float(final_acc['test_acc']):.4f}")
+        selected_line = log_accuracies(
+            args.results_path,
+            f"selected_epoch {selected_epoch if selected_epoch is not None else 'baseline'}",
+            selected_acc,
+        )
+        print(f"   {selected_line}")
+        print(f"   selected | test_acc: {test_acc:.4f}")
 
     if args.check_path is not None:
         check_dir = os.path.dirname(args.check_path)
@@ -242,9 +368,12 @@ def amnesiac(loaders: Dict[str, DataLoader], args: AmnesiacInput):
         "forget_class": forget_class,
         "baseline_acc": baseline_acc,
         "final_acc": final_acc,
-        "selected_acc": final_acc,
-        "best_epoch": epoch_list[-1] if epoch_list else None,
-        "selection_strategy": "last_epoch",
+        "selected_acc": selected_acc,
+        "best_epoch": selected_epoch,
+        "selection_strategy": "min_vf_subject_to_vr_floor",
+        "selection_vr_floor": min_vr_for_selection,
+        "selection_delta": selection_delta,
+        "selection_constraint_satisfied": used_constraint,
         "summary_path": summary_path,
         "history_csv_path": history_path,
     }
@@ -253,9 +382,9 @@ def amnesiac(loaders: Dict[str, DataLoader], args: AmnesiacInput):
         method="amnesiac",
         baseline_metrics=baseline_acc,
         final_metrics=final_acc,
-        selected_metrics=final_acc,
+        selected_metrics=selected_acc,
         selected_epoch=history["best_epoch"],
-        selection_strategy="last_epoch",
+        selection_strategy="min_vf_subject_to_vr_floor",
         history_rows=epoch_metrics,
         loaders=loaders,
         run_config=to_serializable_dict(args),
@@ -268,6 +397,13 @@ def amnesiac(loaders: Dict[str, DataLoader], args: AmnesiacInput):
         extra={
             "forget_class": forget_class,
             "unlearn_epochs": int(args.unlearn_epochs),
+            "amnesiac_train_epochs": int(getattr(args, "amnesiac_train_epochs", 5)),
+            "unlearning_batch_size": int(getattr(args, "unlearning_batch_size", 128)),
+            "optimizer_type": str(getattr(args, "optimizer_type", "adam")),
+            "learning_rate": float(getattr(args, "learning_rate", 1e-4)),
+            "selection_delta": selection_delta,
+            "selection_vr_floor": min_vr_for_selection,
+            "selection_constraint_satisfied": used_constraint,
         },
     )
     save_unlearning_summary(summary_path, summary)

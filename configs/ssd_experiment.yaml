@@ -42,10 +42,16 @@ exponent: 1.0
 forget_threshold: 1.0
 min_layer: -1
 max_layer: -1
-dampening_constant: 1
-selection_weighting: 70
+# For tiny forget sets (e.g., 25 examples), use a more conservative SSD update to
+# reduce collateral utility loss while still lowering forget accuracy.
+dampening_constant: 5
+selection_weighting: 120
+
+# Run multiple SSD passes and pick the checkpoint with minimum vf_acc subject to
+# vr_acc >= baseline_vr_acc - selection_delta.
+unlearn_epochs: 3
+selection_delta: 0.10
 
 eval_every: 1
-selection_delta: 0.0
 print_accuracies: true
 device: null
