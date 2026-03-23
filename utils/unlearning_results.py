@@ -243,3 +243,90 @@ def build_unlearning_summary(
     }
 
     return summary
+
+
+def select_unlearning_checkpoint(
+    candidates: Sequence[Dict[str, Any]],
+    baseline_metrics: Dict[str, Any],
+    max_valid_retain_acc_drop: Optional[float] = 0.08,
+    max_test_acc_drop: Optional[float] = 0.06,
+    min_valid_forget_acc_drop: float = 0.20,
+    min_train_forget_acc_drop: Optional[float] = None,
+) -> Dict[str, Any]:
+    """
+    Select a checkpoint using guardrails that balance utility and forgetting.
+
+    Selection order:
+    1) Prefer checkpoints satisfying all configured constraints.
+    2) If none satisfy all constraints, keep utility constraints and relax forgetting floor.
+    3) If still none, use all checkpoints.
+
+    Tie-break key favors lower vf_acc, then higher vr_acc, then higher test_acc.
+    """
+    if not candidates:
+        raise ValueError("No checkpoint candidates were provided for selection")
+
+    baseline_vr = float(baseline_metrics.get("vr_acc", 0.0))
+    baseline_vf = float(baseline_metrics.get("vf_acc", 0.0))
+    baseline_tf = float(baseline_metrics.get("tf_acc", 0.0))
+    baseline_test = float(baseline_metrics.get("test_acc", 0.0))
+
+    def _passes_utility(candidate: Dict[str, Any]) -> bool:
+        acc = candidate["acc"]
+        if max_valid_retain_acc_drop is not None:
+            vr_drop = baseline_vr - float(acc.get("vr_acc", 0.0))
+            if vr_drop > float(max_valid_retain_acc_drop):
+                return False
+        if max_test_acc_drop is not None and "test_acc" in acc:
+            test_drop = baseline_test - float(acc.get("test_acc", 0.0))
+            if test_drop > float(max_test_acc_drop):
+                return False
+        return True
+
+    def _passes_forgetting(candidate: Dict[str, Any]) -> bool:
+        acc = candidate["acc"]
+        vf_drop = baseline_vf - float(acc.get("vf_acc", 0.0))
+        if vf_drop < float(min_valid_forget_acc_drop):
+            return False
+        if min_train_forget_acc_drop is not None:
+            tf_drop = baseline_tf - float(acc.get("tf_acc", 0.0))
+            if tf_drop < float(min_train_forget_acc_drop):
+                return False
+        return True
+
+    strict = [c for c in candidates if _passes_utility(c) and _passes_forgetting(c)]
+    utility_only = [c for c in candidates if _passes_utility(c)]
+
+    selected_pool: Sequence[Dict[str, Any]]
+    fallback_reason = "all_constraints"
+    if strict:
+        selected_pool = strict
+    elif utility_only:
+        selected_pool = utility_only
+        fallback_reason = "utility_only_relaxed_forgetting"
+    else:
+        selected_pool = list(candidates)
+        fallback_reason = "all_candidates_relaxed_all_constraints"
+
+    best = min(
+        selected_pool,
+        key=lambda candidate: (
+            float(candidate["acc"].get("vf_acc", 1.0)),
+            -float(candidate["acc"].get("vr_acc", 0.0)),
+            -float(candidate["acc"].get("test_acc", 0.0)),
+            int(candidate["epoch"]),
+        ),
+    )
+
+    return {
+        "candidate": best,
+        "pool_size": int(len(selected_pool)),
+        "total_candidates": int(len(candidates)),
+        "fallback_reason": fallback_reason,
+        "constraints": {
+            "max_valid_retain_acc_drop": max_valid_retain_acc_drop,
+            "max_test_acc_drop": max_test_acc_drop,
+            "min_valid_forget_acc_drop": min_valid_forget_acc_drop,
+            "min_train_forget_acc_drop": min_train_forget_acc_drop,
+        },
+    }

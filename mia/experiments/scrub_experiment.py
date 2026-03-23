@@ -31,6 +31,7 @@ from utils.unlearning_results import (
     build_unlearning_summary,
     make_run_tag,
     resolve_unlearning_artifact_paths,
+    select_unlearning_checkpoint,
     save_unlearning_history_csv,
     save_unlearning_summary,
     to_serializable_dict,
@@ -233,14 +234,17 @@ def scrub(loaders, args):
 
     tr_accs, tf_accs, vr_accs, vf_accs, epoch_list = [], [], [], [], []
     epoch_metrics = []
-    best_score = float("-inf")
-    best_epoch = 0
     _baseline_state = {k: v.clone() for k, v in model.state_dict().items()}
-    best_state_dict = copy.deepcopy(model.state_dict())
+    selected_state_dict = copy.deepcopy(model.state_dict())
+    selected_epoch = 0
     final_acc = dict(baseline_acc)
 
-    retain_weight = float(getattr(args, "retain_weight", 1.0))
-    forget_weight = float(getattr(args, "forget_weight", 1.0))
+    selection_delta = float(getattr(args, "selection_delta", 0.08))
+    max_valid_retain_acc_drop = float(getattr(args, "max_valid_retain_acc_drop", selection_delta))
+    max_test_acc_drop = getattr(args, "max_test_acc_drop", 0.06)
+    min_valid_forget_acc_drop = float(getattr(args, "min_valid_forget_acc_drop", 0.20))
+    min_train_forget_acc_drop = getattr(args, "min_train_forget_acc_drop", None)
+    epoch_state_snapshots = []
 
     for epoch in range(1, unlearn_runs + 1):
         model = _run_scrub_with_config(
@@ -257,6 +261,7 @@ def scrub(loaders, args):
         acc_dict.update(evaluate_split_metrics(model, train_forget_loader, device, "tf"))
         acc_dict.update(evaluate_split_metrics(model, valid_retain_loader, device, "vr"))
         acc_dict.update(evaluate_split_metrics(model, valid_forget_loader, device, "vf"))
+        acc_dict.update(evaluate_split_metrics(model, test_loader, device, "test"))
 
         tr_accs.append(acc_dict["tr_acc"])
         tf_accs.append(acc_dict["tf_acc"])
@@ -264,6 +269,16 @@ def scrub(loaders, args):
         vf_accs.append(acc_dict["vf_acc"])
         epoch_list.append(epoch)
         epoch_metrics.append(build_epoch_record(epoch, acc_dict))
+        epoch_state_snapshots.append(
+            {
+                "epoch": epoch,
+                "acc": dict(acc_dict),
+                "state_dict": {
+                    name: tensor.detach().cpu().clone()
+                    for name, tensor in model.state_dict().items()
+                },
+            }
+        )
         final_acc = dict(acc_dict)
 
         print(
@@ -280,18 +295,38 @@ def scrub(loaders, args):
         if args.print_accuracies:
             log_accuracies(results_path, f"epoch {epoch}", acc_dict)
 
-        # Select checkpoint maximizing retain performance while penalizing forget performance.
-        score = (retain_weight * acc_dict["vr_acc"]) - (forget_weight * acc_dict["vf_acc"])
-        if score > best_score:
-            best_score = score
-            best_epoch = epoch
-            best_state_dict = copy.deepcopy(model.state_dict())
+    used_constraint = True
+    if epoch_state_snapshots:
+        selection_info = select_unlearning_checkpoint(
+            candidates=epoch_state_snapshots,
+            baseline_metrics=baseline_acc,
+            max_valid_retain_acc_drop=max_valid_retain_acc_drop,
+            max_test_acc_drop=(float(max_test_acc_drop) if max_test_acc_drop is not None else None),
+            min_valid_forget_acc_drop=min_valid_forget_acc_drop,
+            min_train_forget_acc_drop=(
+                float(min_train_forget_acc_drop)
+                if min_train_forget_acc_drop is not None
+                else None
+            ),
+        )
+        chosen = selection_info["candidate"]
+        selected_epoch = int(chosen["epoch"])
+        selected_state_dict = chosen["state_dict"]
+        used_constraint = selection_info["fallback_reason"] == "all_constraints"
+        if not used_constraint:
+            print(
+                "[SCRUB] Guardrailed selection fallback: {} ({}/{} candidates considered).".format(
+                    selection_info["fallback_reason"],
+                    selection_info["pool_size"],
+                    selection_info["total_candidates"],
+                )
+            )
 
     final_acc.update(evaluate_split_metrics(model, test_loader, device, "test"))
 
-    report_weight_diff(_baseline_state, best_state_dict, "SCRUB")
+    report_weight_diff(_baseline_state, selected_state_dict, "SCRUB")
 
-    model.load_state_dict(best_state_dict)
+    model.load_state_dict(selected_state_dict)
     model.eval()
 
     selected_acc = {}
@@ -302,8 +337,8 @@ def scrub(loaders, args):
     selected_acc.update(evaluate_split_metrics(model, test_loader, device, "test"))
 
     if args.print_accuracies:
-        log_accuracies(results_path, f"selected_epoch {best_epoch}", selected_acc)
-        print(f"   selected_epoch {best_epoch} | test_acc: {selected_acc['test_acc']:.4f}")
+        log_accuracies(results_path, f"selected_epoch {selected_epoch}", selected_acc)
+        print(f"   selected_epoch {selected_epoch} | test_acc: {selected_acc['test_acc']:.4f}")
 
     if getattr(args, "check_path", None) is not None:
         check_dir = os.path.dirname(args.check_path)
@@ -326,12 +361,17 @@ def scrub(loaders, args):
         "tf_accs": tf_accs,
         "vr_accs": vr_accs,
         "vf_accs": vf_accs,
-        "best_epoch": best_epoch,
+        "best_epoch": selected_epoch,
         "selected_acc": selected_acc,
         "baseline_acc": baseline_acc,
         "final_acc": final_acc,
         "test_acc": selected_acc["test_acc"],
-        "selection_strategy": "best_valid_tradeoff",
+        "selection_strategy": "guardrailed_min_vf",
+        "selection_max_vr_drop": max_valid_retain_acc_drop,
+        "selection_max_test_drop": max_test_acc_drop,
+        "selection_min_vf_drop": min_valid_forget_acc_drop,
+        "selection_min_tf_drop": min_train_forget_acc_drop,
+        "selection_constraint_satisfied": used_constraint,
         "summary_path": summary_path,
         "history_csv_path": history_path,
     }
@@ -341,8 +381,8 @@ def scrub(loaders, args):
         baseline_metrics=baseline_acc,
         final_metrics=final_acc,
         selected_metrics=selected_acc,
-        selected_epoch=best_epoch,
-        selection_strategy="best_valid_tradeoff",
+        selected_epoch=selected_epoch,
+        selection_strategy="guardrailed_min_vf",
         history_rows=epoch_metrics,
         loaders=loaders,
         run_config=to_serializable_dict(args),
@@ -354,8 +394,12 @@ def scrub(loaders, args):
         },
         extra={
             "forget_class": forget_class,
-            "retain_weight": retain_weight,
-            "forget_weight": forget_weight,
+            "selection_delta": selection_delta,
+            "selection_max_vr_drop": max_valid_retain_acc_drop,
+            "selection_max_test_drop": max_test_acc_drop,
+            "selection_min_vf_drop": min_valid_forget_acc_drop,
+            "selection_min_tf_drop": min_train_forget_acc_drop,
+            "selection_constraint_satisfied": used_constraint,
             "unlearn_epochs": unlearn_runs,
         },
     )

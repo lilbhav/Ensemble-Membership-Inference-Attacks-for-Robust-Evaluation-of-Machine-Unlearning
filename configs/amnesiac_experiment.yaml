@@ -21,7 +21,7 @@ rebuild_transfer_checkpoint: false
 split_protocol: "targeted_random"
 forget_class: 3
 retain_count: 900
-forget_count: 25
+forget_count: 100
 left_out_count: 225
 
 check_path: /content/gdrive/My Drive/mia_checkpoints/amnesiac_unlearned_model.pt
@@ -35,9 +35,12 @@ amnesiac_train_epochs: 2
 unlearning_batch_size: 128
 optimizer_type: adam
 
-# Wrapper-level checkpoint selection:
-# choose minimum vf_acc subject to vr_acc >= baseline_vr_acc - selection_delta.
+# Wrapper-level guardrailed checkpoint selection.
 selection_delta: 0.08
+max_valid_retain_acc_drop: 0.08
+max_test_acc_drop: 0.06
+min_valid_forget_acc_drop: 0.20
+min_train_forget_acc_drop: 0.20
 
 eval_every: 1
 device: null

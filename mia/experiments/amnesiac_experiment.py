@@ -40,6 +40,7 @@ from utils.unlearning_results import (
     build_unlearning_summary,
     make_run_tag,
     resolve_unlearning_artifact_paths,
+    select_unlearning_checkpoint,
     save_unlearning_history_csv,
     save_unlearning_summary,
     to_serializable_dict,
@@ -86,6 +87,10 @@ class AmnesiacInput:
     unlearning_batch_size: int = 128
     optimizer_type: str = "adam"
     selection_delta: float = 0.0
+    max_valid_retain_acc_drop: Optional[float] = None
+    max_test_acc_drop: float = 0.06
+    min_valid_forget_acc_drop: float = 0.20
+    min_train_forget_acc_drop: Optional[float] = None
 
 
 def _set_global_determinism(seed: int) -> None:
@@ -237,7 +242,13 @@ def amnesiac(loaders: Dict[str, DataLoader], args: AmnesiacInput):
     epoch_metrics = []
     final_acc = dict(baseline_acc)
     selection_delta = float(getattr(args, "selection_delta", 0.0))
-    min_vr_for_selection = float(baseline_acc["vr_acc"]) - selection_delta
+    max_valid_retain_acc_drop = getattr(args, "max_valid_retain_acc_drop", None)
+    if max_valid_retain_acc_drop is None:
+        max_valid_retain_acc_drop = selection_delta
+
+    max_test_acc_drop = getattr(args, "max_test_acc_drop", 0.06)
+    min_valid_forget_acc_drop = float(getattr(args, "min_valid_forget_acc_drop", 0.20))
+    min_train_forget_acc_drop = getattr(args, "min_train_forget_acc_drop", None)
     epoch_state_snapshots = []
     _baseline_state = {k: v.clone() for k, v in model.state_dict().items()}
 
@@ -255,6 +266,7 @@ def amnesiac(loaders: Dict[str, DataLoader], args: AmnesiacInput):
 
         model.eval()
         acc_dict = _evaluate_all(model, loaders, device)
+        acc_dict.update(evaluate_split_metrics(model, loaders["test_loader"], device, "test"))
 
         epoch_list.append(epoch)
         tr_accs.append(acc_dict["tr_acc"])
@@ -290,30 +302,39 @@ def amnesiac(loaders: Dict[str, DataLoader], args: AmnesiacInput):
             print(f"   {line}")
 
     if epoch_state_snapshots:
-        feasible_candidates = [
-            candidate
-            for candidate in epoch_state_snapshots
-            if float(candidate["acc"]["vr_acc"]) >= min_vr_for_selection
-        ]
-        used_constraint = True
-        if not feasible_candidates:
-            feasible_candidates = list(epoch_state_snapshots)
-            used_constraint = False
-            print(
-                "[Amnesiac] No checkpoint satisfied vr_acc >= {:.4f}; "
-                "falling back to lowest vf_acc across all checkpoints.".format(min_vr_for_selection)
-            )
-
-        selected_candidate = min(
-            feasible_candidates,
-            key=lambda candidate: (
-                float(candidate["acc"]["vf_acc"]),
-                -float(candidate["acc"]["vr_acc"]),
-                int(candidate["epoch"]),
+        selection_info = select_unlearning_checkpoint(
+            candidates=epoch_state_snapshots,
+            baseline_metrics=baseline_acc,
+            max_valid_retain_acc_drop=(
+                float(max_valid_retain_acc_drop)
+                if max_valid_retain_acc_drop is not None
+                else None
+            ),
+            max_test_acc_drop=(
+                float(max_test_acc_drop)
+                if max_test_acc_drop is not None
+                else None
+            ),
+            min_valid_forget_acc_drop=float(min_valid_forget_acc_drop),
+            min_train_forget_acc_drop=(
+                float(min_train_forget_acc_drop)
+                if min_train_forget_acc_drop is not None
+                else None
             ),
         )
+        selected_candidate = selection_info["candidate"]
         selected_epoch = int(selected_candidate["epoch"])
         selected_state_dict = selected_candidate["state_dict"]
+        used_constraint = selection_info["fallback_reason"] == "all_constraints"
+        if not used_constraint:
+            print(
+                "[Amnesiac] Guardrailed selection fallback: {} "
+                "({}/{} candidates considered).".format(
+                    selection_info["fallback_reason"],
+                    selection_info["pool_size"],
+                    selection_info["total_candidates"],
+                )
+            )
     else:
         selected_epoch = None
         selected_state_dict = {name: tensor.detach().cpu().clone() for name, tensor in model.state_dict().items()}
@@ -372,8 +393,11 @@ def amnesiac(loaders: Dict[str, DataLoader], args: AmnesiacInput):
         "final_acc": final_acc,
         "selected_acc": selected_acc,
         "best_epoch": selected_epoch,
-        "selection_strategy": "min_vf_subject_to_vr_floor",
-        "selection_vr_floor": min_vr_for_selection,
+        "selection_strategy": "guardrailed_min_vf",
+        "selection_max_vr_drop": max_valid_retain_acc_drop,
+        "selection_max_test_drop": max_test_acc_drop,
+        "selection_min_vf_drop": min_valid_forget_acc_drop,
+        "selection_min_tf_drop": min_train_forget_acc_drop,
         "selection_delta": selection_delta,
         "selection_constraint_satisfied": used_constraint,
         "summary_path": summary_path,
@@ -386,7 +410,7 @@ def amnesiac(loaders: Dict[str, DataLoader], args: AmnesiacInput):
         final_metrics=final_acc,
         selected_metrics=selected_acc,
         selected_epoch=history["best_epoch"],
-        selection_strategy="min_vf_subject_to_vr_floor",
+        selection_strategy="guardrailed_min_vf",
         history_rows=epoch_metrics,
         loaders=loaders,
         run_config=to_serializable_dict(args),
@@ -404,7 +428,10 @@ def amnesiac(loaders: Dict[str, DataLoader], args: AmnesiacInput):
             "optimizer_type": str(getattr(args, "optimizer_type", "adam")),
             "learning_rate": float(getattr(args, "learning_rate", 1e-4)),
             "selection_delta": selection_delta,
-            "selection_vr_floor": min_vr_for_selection,
+            "selection_max_vr_drop": max_valid_retain_acc_drop,
+            "selection_max_test_drop": max_test_acc_drop,
+            "selection_min_vf_drop": min_valid_forget_acc_drop,
+            "selection_min_tf_drop": min_train_forget_acc_drop,
             "selection_constraint_satisfied": used_constraint,
         },
     )
