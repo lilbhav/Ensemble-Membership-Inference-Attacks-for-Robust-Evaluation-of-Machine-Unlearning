@@ -254,6 +254,39 @@ def _build_score_based_ensembles(
     }
 
 
+def _prior_rank_predictions(member_scores: np.ndarray, nonmember_scores: np.ndarray) -> np.ndarray:
+    """Create binary predictions by selecting top-K scores, where K=#members."""
+    member_scores = np.asarray(member_scores, dtype=float)
+    nonmember_scores = np.asarray(nonmember_scores, dtype=float)
+    all_scores = np.concatenate([member_scores, nonmember_scores])
+    num_members = len(member_scores)
+
+    predictions = np.zeros(len(all_scores), dtype=int)
+    if num_members > 0:
+        top_idx = np.argsort(all_scores)[::-1][:num_members]
+        predictions[top_idx] = 1
+    return predictions
+
+
+def _orient_scores_member_high(result: AttackResult) -> bool:
+    """
+    Ensure score direction is consistent: higher score => more member-like.
+
+    Returns True when orientation was flipped.
+    """
+    member_mean = float(np.mean(result.member_scores))
+    nonmember_mean = float(np.mean(result.nonmember_scores))
+
+    if member_mean >= nonmember_mean:
+        return False
+
+    # Monotonic inversion preserves ranking while fixing direction.
+    result.member_scores = -np.asarray(result.member_scores, dtype=float)
+    result.nonmember_scores = -np.asarray(result.nonmember_scores, dtype=float)
+    result.all_predictions = _prior_rank_predictions(result.member_scores, result.nonmember_scores)
+    return True
+
+
 def create_model(architecture: str, dataset_name: str, device: str) -> torch.nn.Module:
     """Create a fresh model with given architecture and number of classes."""
     import torchvision.models as models
@@ -609,6 +642,13 @@ def run_mia_experiment(config_path: str,
                 aux_dataloader=shadow_aux_loader,
                 device=device,
             )
+
+            if _orient_scores_member_high(result):
+                logger.info(
+                    "  ↺ %s scores were inverted to enforce member-high orientation.",
+                    attack_config.name,
+                )
+
             runner.attack_results[attack_config.name] = result
             logger.info(f"  ✓ {attack_config.name} completed")
         except Exception as e:
