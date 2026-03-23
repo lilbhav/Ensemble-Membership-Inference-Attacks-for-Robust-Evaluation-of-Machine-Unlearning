@@ -204,6 +204,9 @@ def _build_score_based_ensembles(
     if not attack_results:
         raise ValueError("No attack results available for ensemble construction")
 
+    first_result = next(iter(attack_results.values()))
+    num_members = len(first_result.member_scores)
+
     normalized_scores = []
     for result in attack_results.values():
         combined_scores = np.concatenate([result.member_scores, result.nonmember_scores]).astype(float)
@@ -215,14 +218,29 @@ def _build_score_based_ensembles(
     if k > num_attacks:
         raise ValueError(f"k ({k}) cannot be greater than number of attacks ({num_attacks})")
 
+    def _rank_predictions(scores: np.ndarray) -> np.ndarray:
+        """Predict the top-num_members scoring samples as members.
+
+        A fixed 0.5 threshold collapses accuracy under extreme class imbalance
+        (e.g. 25 members vs 10000 non-members) because normalised ensemble scores
+        can push the vast majority above 0.5.  Rank-based assignment guarantees
+        exactly num_members positive predictions, which is calibrated to the true
+        member prior and gives meaningful accuracy values.
+        """
+        predictions = np.zeros(len(scores), dtype=int)
+        if num_members > 0:
+            top_idx = np.argsort(scores)[::-1][:num_members]
+            predictions[top_idx] = 1
+        return predictions
+
     # Union score captures strongest membership evidence among attacks.
     union_scores = np.max(scores_matrix, axis=0)
-    union_predictions = (union_scores >= 0.5).astype(int)
+    union_predictions = _rank_predictions(union_scores)
 
     # Voting score uses vote ratio; hard prediction follows k-of-M rule.
     vote_counts = np.sum(scores_matrix >= 0.5, axis=0)
     voting_scores = vote_counts.astype(float) / float(num_attacks)
-    voting_predictions = (vote_counts >= k).astype(int)
+    voting_predictions = _rank_predictions(voting_scores)
 
     return {
         "union": {
@@ -527,6 +545,20 @@ def run_mia_experiment(config_path: str,
     nonmember_loader = DataLoader(nonmember_data, batch_size=batch_size, shuffle=False)
     aux_loader = DataLoader(aux_data, batch_size=batch_size, shuffle=False) if aux_data is not None else None
 
+    # Shadow-based attacks (shokri, calibration, lira) train shadow models on the auxiliary dataset.
+    # For forget_vs_test with targeted class unlearning, the left-out auxiliary data excludes the
+    # forget class entirely, so no attack model is trained for that label (causing fallbacks and
+    # inverted AUC). Use the full test set as shadow auxiliary instead: it covers all label classes
+    # including the forget class, giving shadow models enough class-diverse examples to train on.
+    if evaluation_target == 'forget_vs_test':
+        shadow_aux_loader = DataLoader(test_data, batch_size=batch_size, shuffle=False)
+        logger.info(
+            "Shadow auxiliary: using test_data (%d samples) to cover all classes including forget class.",
+            len(test_data),
+        )
+    else:
+        shadow_aux_loader = aux_loader
+
     logger.info("MIA evaluation_target: %s", evaluation_target)
     logger.info("  member set (%s): %d", member_name, len(member_data))
     logger.info("  non-member set (%s): %d", nonmember_name, len(nonmember_data))
@@ -574,7 +606,7 @@ def run_mia_experiment(config_path: str,
                 target_model=unlearned_model,
                 train_dataloader=member_loader,
                 test_dataloader=nonmember_loader,
-                aux_dataloader=aux_loader,
+                aux_dataloader=shadow_aux_loader,
                 device=device,
             )
             runner.attack_results[attack_config.name] = result
@@ -618,6 +650,19 @@ def run_mia_experiment(config_path: str,
         logger.info(f"\n{attack_name}:")
         for metric_name, metric_value in attack_metrics.items():
             logger.info(f"  {metric_name}: {metric_value:.4f}")
+
+    inverted_attacks = [
+        attack_name
+        for attack_name, attack_metrics in metrics.items()
+        if float(attack_metrics.get("auc", 0.5)) < 0.5
+    ]
+    if inverted_attacks:
+        logger.warning(
+            "Detected inverted attacks (AUC < 0.5): %s. "
+            "This usually indicates score-direction mismatch or poor shadow-data calibration; "
+            "interpret ensemble metrics with caution.",
+            inverted_attacks,
+        )
     
     # Save results
     logger.info("\n" + "="*80)

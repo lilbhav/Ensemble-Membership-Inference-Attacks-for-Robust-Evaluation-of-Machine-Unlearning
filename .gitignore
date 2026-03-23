@@ -16,4 +16,4 @@ data/splits/*.npy
 results/plots/
 
 # Generated unlearning experiment artifacts
-results/unlearningresults/
+results/unlearning_results/
