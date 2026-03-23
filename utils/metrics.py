@@ -186,7 +186,9 @@ def report_weight_diff(
     for name in baseline_state:
         if name not in unlearned_state:
             continue
-        diff = (unlearned_state[name].float() - baseline_state[name].float()).norm().item()
+        baseline_tensor = baseline_state[name].detach().float().cpu()
+        unlearned_tensor = unlearned_state[name].detach().float().cpu()
+        diff = (unlearned_tensor - baseline_tensor).norm().item()
         layer_diffs[name] = diff
 
     if not layer_diffs:
