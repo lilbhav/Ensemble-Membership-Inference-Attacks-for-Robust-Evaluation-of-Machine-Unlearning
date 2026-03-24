@@ -1,7 +1,7 @@
 dataset: cifar10
 dataroot: /content/data/raw
 seed: 42
-split_dir: /content/gdrive/My Drive/mia_splits/scrub_targeted_random
+split_dir: /content/gdrive/My Drive/mia_splits/shared_targeted_random
 
 # Transfer setup: pretrain on CIFAR-100, replace final layer, fine-tune on CIFAR-10.
 source_checkpoint_cifar100: /content/gdrive/My Drive/mia_checkpoints/pretrained_cifar100.pt

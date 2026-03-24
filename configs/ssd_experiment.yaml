@@ -2,7 +2,7 @@ dataset: cifar10
 dataroot: /content/data/raw
 forget_fraction: 0.2
 seed: 42
-split_dir: /content/gdrive/My Drive/mia_splits/ssd_targeted_random
+split_dir: "/content/gdrive/My Drive/mia_splits/shared_targeted_random"
 batch_size: 128
 num_workers: 2
 pin_memory: true

@@ -577,7 +577,7 @@ def _plot_unlearning_selected_metrics(records: List[Dict[str, object]], out_dir:
         ("test_acc", "Test Acc", "#1b9e77"),
     ]
 
-    fig, axes = plt.subplots(1, 3, figsize=(16, 5), sharey=True)
+    fig, axes = plt.subplots(1, 3, figsize=(17, 6), sharey=True)
     x = list(range(len(methods)))
     width = 0.38
 
@@ -595,16 +595,16 @@ def _plot_unlearning_selected_metrics(records: List[Dict[str, object]], out_dir:
         axis.bar([p - width / 2 for p in x], baseline_values, width=width, label="baseline", color="#dce6f2")
         axis.bar([p + width / 2 for p in x], selected_values, width=width, label="selected", color=color)
         axis.set_xticks(x)
-        axis.set_xticklabels(methods, rotation=20, ha="right")
+        axis.set_xticklabels(methods, rotation=28, ha="right")
         axis.set_ylim(0.0, 1.02)
         axis.set_title(title)
         axis.grid(axis="y")
 
     axes[0].set_ylabel("Accuracy")
     handles, labels = axes[0].get_legend_handles_labels()
-    fig.legend(handles, labels, loc="upper center", ncol=2)
-    fig.suptitle("Baseline vs Selected Performance", y=1.03)
-    fig.tight_layout()
+    fig.suptitle("Baseline vs Selected Performance", y=0.995)
+    fig.legend(handles, labels, loc="upper center", bbox_to_anchor=(0.5, 0.95), ncol=2)
+    fig.tight_layout(rect=(0.01, 0.03, 0.99, 0.86))
 
     out_path = out_dir / "unlearning_selected_metrics_bar.png"
     fig.savefig(out_path, dpi=dpi, bbox_inches="tight")
@@ -633,13 +633,13 @@ def _plot_unlearning_delta_heatmap(records: List[Dict[str, object]], out_dir: Pa
             values.append(float("nan") if value is None else value)
         matrix.append(values)
 
-    fig, ax = plt.subplots(figsize=(9, 5.5))
+    fig, ax = plt.subplots(figsize=(10, 6))
     image = ax.imshow(matrix, aspect="auto", cmap="YlGnBu", vmin=0.0, vmax=1.0)
     cbar = fig.colorbar(image, ax=ax)
     cbar.set_label("Normalized score (higher is better)")
 
     ax.set_xticks(range(len(metric_order)))
-    ax.set_xticklabels([label for _, label in metric_order], rotation=20, ha="right")
+    ax.set_xticklabels([label for _, label in metric_order], rotation=26, ha="right")
     ax.set_yticks(range(len(methods)))
     ax.set_yticklabels(methods)
     ax.set_title("Method Quality Heatmap (Derived Metrics)")
@@ -649,7 +649,7 @@ def _plot_unlearning_delta_heatmap(records: List[Dict[str, object]], out_dir: Pa
             if value == value:
                 ax.text(j, i, f"{value:.2f}", ha="center", va="center", fontsize=8, color="#0f172a")
 
-    fig.tight_layout()
+    fig.tight_layout(rect=(0.01, 0.02, 0.98, 0.98))
     out_path = out_dir / "unlearning_delta_heatmap.png"
     fig.savefig(out_path, dpi=dpi, bbox_inches="tight")
     plt.close(fig)
@@ -696,7 +696,7 @@ def _plot_unlearning_forget_retain_scatter(records: List[Dict[str, object]], out
     ax.set_ylabel("Forget efficacy = (baseline_tf - selected_tf) / baseline_tf")
     ax.set_title("Unlearning Tradeoff Map (bubble size = test preservation)")
     ax.grid(alpha=0.35)
-    fig.tight_layout()
+    fig.tight_layout(rect=(0.01, 0.02, 0.99, 0.98))
 
     out_path = out_dir / "unlearning_forget_retain_scatter.png"
     fig.savefig(out_path, dpi=dpi, bbox_inches="tight")
@@ -705,7 +705,7 @@ def _plot_unlearning_forget_retain_scatter(records: List[Dict[str, object]], out
 
 
 def _plot_unlearning_history(records: List[Dict[str, object]], out_dir: Path, dpi: int) -> Optional[Path]:
-    fig, axes = plt.subplots(1, 2, figsize=(14, 5), sharex=False, sharey=True)
+    fig, axes = plt.subplots(1, 2, figsize=(15, 6), sharex=False, sharey=True)
     plotted_methods: Set[str] = set()
 
     for record in records:
@@ -738,10 +738,10 @@ def _plot_unlearning_history(records: List[Dict[str, object]], out_dir: Path, dp
 
     handles, labels = axes[0].get_legend_handles_labels()
     if handles:
-        fig.legend(handles, labels, loc="upper center", ncol=min(5, len(labels)))
+        fig.legend(handles, labels, loc="upper center", bbox_to_anchor=(0.5, 0.95), ncol=min(5, len(labels)))
 
-    fig.suptitle("Unlearning Trajectory Focus View", y=1.04)
-    fig.tight_layout()
+    fig.suptitle("Unlearning Trajectory Focus View", y=0.995)
+    fig.tight_layout(rect=(0.01, 0.03, 0.99, 0.88))
 
     out_path = out_dir / "unlearning_history_lines.png"
     fig.savefig(out_path, dpi=dpi, bbox_inches="tight")
@@ -761,7 +761,7 @@ def _plot_unlearning_prf_macro(records: List[Dict[str, object]], out_dir: Path, 
     forget = [float("nan") if row.get("forget_effectiveness") is None else float(row.get("forget_effectiveness")) for row in ranked]
 
     y = list(range(len(methods)))
-    fig, axes = plt.subplots(1, 2, figsize=(14, 6), sharey=True)
+    fig, axes = plt.subplots(1, 2, figsize=(15, 6.5), sharey=True)
 
     axes[0].barh(y, scores, color="#1d4ed8", alpha=0.9)
     axes[0].set_xlim(0.0, 1.0)
@@ -781,8 +781,8 @@ def _plot_unlearning_prf_macro(records: List[Dict[str, object]], out_dir: Path, 
     axes[1].set_xlabel("Normalized component")
     axes[1].legend(loc="lower right")
 
-    fig.suptitle("Unlearning Leaderboard", y=1.02)
-    fig.tight_layout()
+    fig.suptitle("Unlearning Leaderboard", y=0.995)
+    fig.tight_layout(rect=(0.01, 0.03, 0.99, 0.93))
 
     out_path = out_dir / "unlearning_prf_macro_bar.png"
     fig.savefig(out_path, dpi=dpi, bbox_inches="tight")
@@ -920,7 +920,7 @@ def _plot_utility_bars(utility_rows: List[Dict[str, object]], out_dir: Path, dpi
     width = 0.18
     x = list(range(len(methods)))
 
-    fig, ax = plt.subplots(figsize=(11, 6))
+    fig, ax = plt.subplots(figsize=(12, 6.5))
     for idx, key in enumerate(metrics):
         values = [row.get(key) for row in utility_rows]
         values = [float(v) if v is not None else 0.0 for v in values]
@@ -928,13 +928,13 @@ def _plot_utility_bars(utility_rows: List[Dict[str, object]], out_dir: Path, dpi
         ax.bar(offset, values, width=width, label=key)
 
     ax.set_xticks(x)
-    ax.set_xticklabels(methods, rotation=20, ha="right")
+    ax.set_xticklabels(methods, rotation=30, ha="right")
     ax.set_ylim(0, 1.0)
     ax.set_ylabel("Accuracy")
     ax.set_title("Unlearning Utility Metrics")
-    ax.legend()
+    ax.legend(loc="upper right")
     ax.grid(axis="y", alpha=0.25)
-    fig.tight_layout()
+    fig.tight_layout(rect=(0.02, 0.05, 0.99, 0.98))
 
     out_path = out_dir / "utility_metrics_bar.png"
     fig.savefig(out_path, dpi=dpi)
@@ -949,15 +949,15 @@ def _plot_attack_auc_bars(attack_rows: List[Dict[str, object]], out_dir: Path, d
     labels = [f"{row['method']}:{row['attack']}" for row in attack_rows]
     aucs = [float(row["auc"]) for row in attack_rows]
 
-    fig, ax = plt.subplots(figsize=(12, 6))
+    fig, ax = plt.subplots(figsize=(14, 6.5))
     ax.bar(range(len(labels)), aucs)
     ax.set_xticks(range(len(labels)))
-    ax.set_xticklabels(labels, rotation=35, ha="right")
+    ax.set_xticklabels(labels, rotation=45, ha="right")
     ax.set_ylim(0, 1.0)
     ax.set_ylabel("AUC (higher = more leakage)")
     ax.set_title("MIA Attack AUC by Method")
     ax.grid(axis="y", alpha=0.25)
-    fig.tight_layout()
+    fig.tight_layout(rect=(0.01, 0.10, 0.99, 0.98))
 
     out_path = out_dir / "mia_auc_bar.png"
     fig.savefig(out_path, dpi=dpi)
@@ -994,7 +994,7 @@ def _plot_privacy_utility_scatter(
     ax.set_ylabel("Privacy leakage (max attack AUC)")
     ax.set_title("Privacy-Utility Tradeoff")
     ax.grid(alpha=0.3)
-    fig.tight_layout()
+    fig.tight_layout(rect=(0.02, 0.02, 0.99, 0.98))
 
     out_path = out_dir / "privacy_utility_scatter.png"
     fig.savefig(out_path, dpi=dpi)
@@ -1021,14 +1021,14 @@ def _plot_ssd_heatmap(sweep_rows: List[Dict[str, float]], out_dir: Path, dpi: in
             row_vals.append(score if score is not None else float("nan"))
         matrix.append(row_vals)
 
-    fig, ax = plt.subplots(figsize=(9, 6))
+    fig, ax = plt.subplots(figsize=(10, 6.5))
     image = ax.imshow(matrix, aspect="auto")
     cbar = fig.colorbar(image, ax=ax)
     cbar.set_label("Tradeoff score")
 
     ax.set_xticks(range(len(selection_values)))
     ax.set_yticks(range(len(dampening_values)))
-    ax.set_xticklabels([str(v) for v in selection_values], rotation=35, ha="right")
+    ax.set_xticklabels([str(v) for v in selection_values], rotation=40, ha="right")
     ax.set_yticklabels([str(v) for v in dampening_values])
     ax.set_xlabel("selection_weighting")
     ax.set_ylabel("dampening_constant")
@@ -1039,7 +1039,7 @@ def _plot_ssd_heatmap(sweep_rows: List[Dict[str, float]], out_dir: Path, dpi: in
             if value == value:
                 ax.text(j, i, f"{value:.3f}", ha="center", va="center", fontsize=8)
 
-    fig.tight_layout()
+    fig.tight_layout(rect=(0.01, 0.03, 0.99, 0.98))
     out_path = out_dir / "ssd_sweep_heatmap.png"
     fig.savefig(out_path, dpi=dpi)
     plt.close(fig)
