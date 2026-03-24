@@ -30,7 +30,7 @@ print_accuracies: true
 
 # Amnesiac hyperparameters
 learning_rate: 0.00005
-unlearn_epochs: 2
+unlearn_epochs: 3
 amnesiac_train_epochs: 1
 unlearning_batch_size: 128
 optimizer_type: adam
