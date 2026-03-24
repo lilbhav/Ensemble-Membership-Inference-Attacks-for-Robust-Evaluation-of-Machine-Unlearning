@@ -81,8 +81,41 @@ unlearning:
   #   min_layer: -1
   #   max_layer: -1
 
+models_to_evaluate:
+  - name: "scrub"
+    model_type: "unlearned"
+    unlearning_method: "scrub"
+    checkpoint_path: "/content/gdrive/My Drive/mia_checkpoints/scrub_unlearned_model.pt"
+
+  - name: "ssd"
+    model_type: "unlearned"
+    unlearning_method: "ssd"
+    checkpoint_path: "/content/gdrive/My Drive/mia_checkpoints/ssd_unlearned_model.pt"
+
+  - name: "bad_teacher"
+    model_type: "unlearned"
+    unlearning_method: "bad_teacher"
+    checkpoint_path: "/content/gdrive/My Drive/mia_checkpoints/bad_teacher_unlearned_model.pt"
+
+  - name: "amnesiac"
+    model_type: "unlearned"
+    unlearning_method: "amnesiac"
+    checkpoint_path: "/content/gdrive/My Drive/mia_checkpoints/amnesiac_unlearned_model.pt"
+
 mia:
-  evaluation_target: "forget_vs_test"  # primary objective: detect unlearning failures
+  evaluation_targets:
+    - "forget_vs_test"
+    - "retain_vs_test"
+    - "forget_vs_retain"
+
+  ensembles:
+    enabled: true
+    methods:
+      - "union"
+      - "voting"
+      - "average_score"
+    k: 2
+
   attacks:
     - name: "yeom"
       params:

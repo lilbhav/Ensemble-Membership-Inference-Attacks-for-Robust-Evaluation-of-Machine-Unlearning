@@ -97,7 +97,14 @@ class AttackResult:
         Returns:
             Dictionary of metrics
         """
-        from sklearn.metrics import roc_auc_score, roc_curve
+        from sklearn.metrics import (
+            accuracy_score,
+            f1_score,
+            precision_score,
+            recall_score,
+            roc_auc_score,
+            roc_curve,
+        )
 
         if len(np.unique(ground_truth_labels)) < 2:
             logging.warning("Ground truth has only one class; metrics cannot be computed.")
@@ -133,15 +140,21 @@ class AttackResult:
         num_negative = int(np.sum(ground_truth_labels == 0))
         min_nonzero_fpr = (1.0 / num_negative) if num_negative > 0 else 1.0
 
-        # Compute accuracy
-        accuracy = np.mean(self.all_predictions == ground_truth_labels)
+        accuracy = accuracy_score(ground_truth_labels, self.all_predictions)
+        precision = precision_score(ground_truth_labels, self.all_predictions, zero_division=0)
+        recall = recall_score(ground_truth_labels, self.all_predictions, zero_division=0)
+        f1 = f1_score(ground_truth_labels, self.all_predictions, zero_division=0)
 
         # Store metrics
         self.metrics = {
             "auc": float(auc),
             "tpr_at_fpr_0.01": float(tpr_at_fpr_001),
+            "tpr_at_1pct_fpr": float(tpr_at_fpr_001),
             "tpr_at_fpr_0.001": float(tpr_at_fpr_0001),
             "accuracy": float(accuracy),
+            "precision": float(precision),
+            "recall": float(recall),
+            "f1": float(f1),
             "min_nonzero_fpr": float(min_nonzero_fpr),
         }
 
@@ -212,6 +225,8 @@ class MIARunner:
 
         self.logger = logging.getLogger(__name__)
         self.logger.setLevel(logging.INFO)
+        self.logger.handlers.clear()
+        self.logger.propagate = False
 
         # File handler
         fh = logging.FileHandler(log_file)
