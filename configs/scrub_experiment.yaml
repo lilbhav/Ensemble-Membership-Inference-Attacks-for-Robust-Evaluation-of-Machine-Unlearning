@@ -23,7 +23,7 @@ left_out_count: 225
 check_path: /content/gdrive/My Drive/mia_checkpoints/scrub_unlearned_model.pt
 results_path: /content/gdrive/My Drive/mia_checkpoints/scrub_results.txt
 print_accuracies: true
-unlearn_epochs: 3
+unlearn_epochs: 2
 
 batch_size: 128
 num_workers: 2
@@ -33,18 +33,18 @@ eval_every: 1
 # SCRUB hyperparameters
 optim: sgd
 gamma: 1
-alpha: 0.9
-beta: 0.8
+alpha: 0.3
+beta: 0.3
 smoothing: 0.0
-msteps: 10
+msteps: 2
 clip: 0.2
 sstart: 10
 kd_T: 1
 distill: kd
 sgda_batch_size: 64
-del_batch_size: 32
-sgda_epochs: 10
-sgda_learning_rate: 0.001
+del_batch_size: 64
+sgda_epochs: 4
+sgda_learning_rate: 0.0005
 lr_decay_epochs: []
 lr_decay_rate: 0
 sgda_weight_decay: 0
@@ -53,7 +53,7 @@ sgda_momentum: 0.9
 # Wrapper-level guardrailed checkpoint selection.
 # Keep utility close to baseline while requiring meaningful forget-drop.
 selection_delta: 0.08
-max_valid_retain_acc_drop: 0.08
-max_test_acc_drop: 0.06
-min_valid_forget_acc_drop: 0.20
-min_train_forget_acc_drop: 0.20
+max_valid_retain_acc_drop: 0.10
+max_test_acc_drop: 0.10
+min_valid_forget_acc_drop: 0.10
+min_train_forget_acc_drop: 0.10

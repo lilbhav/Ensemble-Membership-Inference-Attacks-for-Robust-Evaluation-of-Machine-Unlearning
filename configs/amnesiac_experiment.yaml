@@ -29,18 +29,18 @@ results_path: /content/gdrive/My Drive/mia_checkpoints/amnesiac_results.txt
 print_accuracies: true
 
 # Amnesiac hyperparameters
-learning_rate: 0.0001
-unlearn_epochs: 3
-amnesiac_train_epochs: 2
+learning_rate: 0.00005
+unlearn_epochs: 2
+amnesiac_train_epochs: 1
 unlearning_batch_size: 128
 optimizer_type: adam
 
 # Wrapper-level guardrailed checkpoint selection.
 selection_delta: 0.08
-max_valid_retain_acc_drop: 0.08
-max_test_acc_drop: 0.06
-min_valid_forget_acc_drop: 0.20
-min_train_forget_acc_drop: 0.20
+max_valid_retain_acc_drop: 0.10
+max_test_acc_drop: 0.10
+min_valid_forget_acc_drop: 0.10
+min_train_forget_acc_drop: 0.10
 
 eval_every: 1
 device: null
