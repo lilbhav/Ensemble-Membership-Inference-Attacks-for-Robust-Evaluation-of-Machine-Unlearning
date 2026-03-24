@@ -38,23 +38,23 @@ learning_rate: 0.1
 # dampening_constant (lambda): dampening scale = (lambda * retain_imp / forget_imp)^exponent.
 #   Lower = more aggressive dampening on selected params.
 lower_bound: 1.0
-exponent: 0.5
+exponent: 1.0
 forget_threshold: 1.0
 min_layer: -1
 max_layer: -1
 # For tiny forget sets (e.g., 25 examples), use a more conservative SSD update to
 # reduce collateral utility loss while still lowering forget accuracy.
-dampening_constant: 6.0
-selection_weighting: 120
+dampening_constant: 120.0
+selection_weighting: 160.0
 
 # Run multiple SSD passes and pick the checkpoint with minimum vf_acc subject to
 # vr_acc >= baseline_vr_acc - selection_delta.
-unlearn_epochs: 2
-selection_delta: 0.08
-max_valid_retain_acc_drop: 0.08
-max_test_acc_drop: 0.07
-min_valid_forget_acc_drop: 0.20
-min_train_forget_acc_drop: 0.20
+unlearn_epochs: 1
+selection_delta: 0.06
+max_valid_retain_acc_drop: 0.06
+max_test_acc_drop: 0.06
+min_valid_forget_acc_drop: 0.10
+min_train_forget_acc_drop: 0.10
 
 eval_every: 1
 print_accuracies: true
