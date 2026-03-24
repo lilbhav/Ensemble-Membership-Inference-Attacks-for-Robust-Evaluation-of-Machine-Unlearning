@@ -17,3 +17,4 @@ results/plots/
 
 # Generated unlearning experiment artifacts
 results/unlearning_results/
+results/mia_results/

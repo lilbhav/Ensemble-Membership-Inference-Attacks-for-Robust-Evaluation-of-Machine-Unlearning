@@ -6,7 +6,7 @@ experiment:
 dataset:
   name: "cifar10"
   data_root: "/content/data/raw"
-  split_dir: "/content/gdrive/My Drive/mia_splits/scrub_targeted_random"
+  split_dir: "/content/gdrive/My Drive/mia_splits/shared_targeted_random"
   forget_fraction: 0.2
   retain_fraction: 0.8
   num_classes: 10
@@ -14,72 +14,16 @@ dataset:
 model:
   architecture: "resnet18"
   pretrained: false
-  checkpoint_path: "./checkpoints/full_model.pt"
 
 unlearning:
-  method: "scrub"   # [scrub, ssd, bad_teacher, amnesiac]
-  checkpoint_path: "/content/gdrive/My Drive/mia_checkpoints/scrub_unlearned_model.pt"
   params:
     split_protocol: "targeted_random"
     forget_class: 3  # 0=airplane 1=automobile 2=bird 3=cat 4=deer 5=dog 6=frog 7=horse 8=ship 9=truck
     # Data protocol — must match the split used during SCRUB/SSD unlearning.
     # Retain: 100/class x 9 classes = 900 | Left-out: 25/class x 9 classes = 225
     retain_count: 900
-    forget_count: 25
+    forget_count: 100
     left_out_count: 225
-
-    # Transfer setup (CIFAR-100 -> CIFAR-10)
-    source_checkpoint_cifar100: "/content/gdrive/My Drive/mia_checkpoints/pretrained_cifar100.pt"
-    model_path: "/content/gdrive/My Drive/mia_checkpoints/finetuned_cifar10_from_cifar100.pt"
-    transfer_finetune_epochs: 10
-    transfer_finetune_batch_size: 128
-    transfer_finetune_learning_rate: 0.001
-
-    # SCRUB hyperparameters
-    optim: "sgd"
-    gamma: 1
-    alpha: 0.9
-    beta: 0.8
-    smoothing: 0.0
-    msteps: 10
-    clip: 0.2
-    sstart: 10
-    kd_T: 1
-    distill: "kd"
-    sgda_batch_size: 64
-    del_batch_size: 32
-    sgda_epochs: 10
-    sgda_learning_rate: 0.001
-    lr_decay_epochs: []
-    lr_decay_rate: 0
-    sgda_weight_decay: 0
-    sgda_momentum: 0.9
-
-  # method: "ssd"
-  # checkpoint_path: "/content/gdrive/My Drive/mia_checkpoints/ssd_unlearned_model.pt"
-  # params:
-  #   # Data protocol
-  #   forget_class: 0
-  #   retain_per_class: 100
-  #   forget_count: 25
-  #   left_out_per_class: 25
-  #
-  #   # Transfer setup (CIFAR-100 -> CIFAR-10)
-  #   source_checkpoint_cifar100: "/content/gdrive/My Drive/mia_checkpoints/pretrained_cifar100.pt"
-  #   model_path: "/content/gdrive/My Drive/mia_checkpoints/finetuned_cifar10_from_cifar100.pt"
-  #   transfer_finetune_epochs: 10
-  #   transfer_finetune_batch_size: 128
-  #   transfer_finetune_learning_rate: 0.001
-  #
-  #   # SSD parameters (current best)
-  #   lr: 0.1
-  #   dampening_constant: 0.9
-  #   selection_weighting: 10.0
-  #   lower_bound: 1.0
-  #   exponent: 1.0
-  #   forget_threshold: 1.5
-  #   min_layer: -1
-  #   max_layer: -1
 
 models_to_evaluate:
   - name: "scrub"
@@ -147,5 +91,5 @@ mia:
         num_augmentations: 2
 
 output:
-  save_dir: "/content/gdrive/My Drive/mia_results/scrub"
+  save_dir: "/content/gdrive/My Drive/mia_results/shared_multi_model"
   log_dir: "/content/gdrive/My Drive/mia_results/logs"
