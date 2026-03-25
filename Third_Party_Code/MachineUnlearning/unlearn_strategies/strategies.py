@@ -29,6 +29,27 @@ def baseline(
     num_channels: int,
     device: torch.device
 ) -> torch.nn.Module:
+    baseline_epochs = int(getattr(args, "baseline_epochs", 0))
+    if baseline_epochs <= 0:
+        return model
+
+    baseline_batch_size = int(getattr(args, "batch_size", 128))
+    baseline_opt = str(getattr(args, "optimizer", "adam")).lower()
+    baseline_train_loader = DataLoader(
+        ConcatDataset((retain_loader.dataset, unlearn_loader.dataset)),
+        batch_size=baseline_batch_size,
+        shuffle=True,
+    )
+    return utils.training_optimization(
+        model=model,
+        train_loader=baseline_train_loader,
+        test_loader=test_loader,
+        epochs=baseline_epochs,
+        device=device,
+        desc="Baseline strategy fine-tuning",
+        opt=baseline_opt,
+    )
+
     return model
 
 
@@ -138,10 +159,25 @@ def bad_teacher(
 ) -> torch.nn.Module:
 
     student_model = deepcopy(model)
-    KL_temperature = 1
-    optimizer = torch.optim.Adam(student_model.parameters(), lr=0.0001)
-    retain_train_subset = random.sample(
-        retain_loader.dataset, int(0.3 * len(retain_loader.dataset)))
+    bt_lr = float(getattr(args, "lr", 0.0001))
+    bt_epochs = int(getattr(args, "epochs", 1))
+    bt_batch_size = int(getattr(args, "batch_size", 256))
+    bt_kl_temperature = float(getattr(args, "kl_temperature", 1.0))
+    bt_subset_fraction = float(getattr(args, "retain_subset_fraction", 0.3))
+    bt_subset_size = max(1, int(bt_subset_fraction * len(retain_loader.dataset)))
+    bt_subset_size = min(bt_subset_size, len(retain_loader.dataset))
+
+    bt_optimizer_name = str(getattr(args, "optimizer", "adam")).lower()
+    if bt_optimizer_name == "sgd":
+        optimizer = torch.optim.SGD(
+            student_model.parameters(),
+            lr=bt_lr,
+            momentum=float(getattr(args, "momentum", 0.9)),
+        )
+    else:
+        optimizer = torch.optim.Adam(student_model.parameters(), lr=bt_lr)
+
+    retain_train_subset = random.sample(retain_loader.dataset, bt_subset_size)
 
     unlearn.blindspot_unlearner(
         model=student_model,
@@ -149,12 +185,12 @@ def bad_teacher(
         full_trained_teacher=model,
         retain_data=retain_train_subset,
         forget_data=unlearn_loader.dataset,
-        epochs=1,
+        epochs=bt_epochs,
         optimizer=optimizer,
-        lr=0.0001,
-        batch_size=256,
+        lr=bt_lr,
+        batch_size=bt_batch_size,
         device=device,
-        KL_temperature=KL_temperature,
+        KL_temperature=bt_kl_temperature,
     )
 
     return student_model
@@ -174,26 +210,23 @@ def scrub(
     device: torch.device,
 ) -> torch.nn.Module:
 
-    # Parameters
-    optim = 'sgd'
-    gamma = 0.99
-    alpha = 0.001
-    beta = 0
-    smoothing = 0.0
-    msteps = 2
-    clip = 0.2
-    sstart = 10
-    kd_T = 4
-    distill = 'kd'
+    # Parameters (defaults preserved from original implementation).
+    gamma = float(getattr(args, "gamma", 0.99))
+    alpha = float(getattr(args, "distill_weight", 0.001))
+    beta = float(getattr(args, "forget_loss_weight", 0.0))
+    msteps = int(getattr(args, "maximize_epochs", 2))
+    maximize_steps = int(getattr(args, "maximize_steps", 1))
+    minimize_steps = int(getattr(args, "minimize_steps", 1))
+    kd_T = float(getattr(args, "kd_temperature", 4.0))
 
-    sgda_batch_size = 128
-    del_batch_size = 32
-    sgda_epochs = 3
-    sgda_learning_rate = 0.0005
-    lr_decay_epochs = [3, 5, 9]
-    lr_decay_rate = 0.1
-    sgda_weight_decay = 5e-4
-    sgda_momentum = 0.9
+    sgda_epochs = int(getattr(args, "epochs", 3))
+    sgda_learning_rate = float(getattr(args, "lr", 0.0005))
+    lr_decay_epochs = getattr(args, "lr_decay_epochs", [3, 5, 9])
+    if isinstance(lr_decay_epochs, str):
+        lr_decay_epochs = [int(part.strip()) for part in lr_decay_epochs.split(",") if part.strip()]
+    lr_decay_rate = float(getattr(args, "lr_decay_rate", 0.1))
+    sgda_weight_decay = float(getattr(args, "weight_decay", 5e-4))
+    sgda_momentum = float(getattr(args, "momentum", 0.9))
 
     # Deep copy avoid overwriting
     model_t = copy.deepcopy(unlearning_teacher)
@@ -239,9 +272,22 @@ def scrub(
 
         maximize_loss = 0
         if epoch <= msteps:
-            maximize_loss = train_distill(
+            for _ in range(maximize_steps):
+                maximize_loss = train_distill(
+                    epoch= epoch,
+                    train_loader= unlearn_loader,
+                    module_list= module_list,
+                    swa_model= None,
+                    criterion_list= criterion_list,
+                    optimizer= optimizer,
+                    gamma= gamma,
+                    alpha= alpha,
+                    beta= beta,
+                    split= "maximize")
+        for _ in range(minimize_steps):
+            train_acc, train_loss = train_distill(
                 epoch= epoch,
-                train_loader= unlearn_loader,
+                train_loader= retain_loader,
                 module_list= module_list,
                 swa_model= None,
                 criterion_list= criterion_list,
@@ -249,19 +295,8 @@ def scrub(
                 gamma= gamma,
                 alpha= alpha,
                 beta= beta,
-                split= "maximize")
-        train_acc, train_loss = train_distill(
-            epoch= epoch,
-            train_loader= retain_loader,
-            module_list= module_list,
-            swa_model= None,
-            criterion_list= criterion_list,
-            optimizer= optimizer,
-            gamma= gamma,
-            alpha= alpha,
-            beta= beta,
-            split= "minimize",
-            quiet= True)
+                split= "minimize",
+                quiet= True)
 
     return model_s
 
@@ -292,16 +327,21 @@ def amnesiac(
         unlearning_trainset.append((x, y))
 
     unlearning_train_set_dl = DataLoader(
-        unlearning_trainset, 128, pin_memory=True, shuffle=True
+        unlearning_trainset,
+        int(getattr(args, "batch_size", 128)),
+        pin_memory=True,
+        shuffle=True,
     )
 
     unlearned_model = utils.training_optimization(
         model= model, 
         train_loader= unlearning_train_set_dl,
         test_loader= test_loader,
-        epochs= 5,
+        epochs= int(getattr(args, "epochs", 5)),
         device= device,
-        desc= "Amnesiac unlearning")
+        desc= "Amnesiac unlearning",
+        opt= str(getattr(args, "optimizer", "adam")).lower(),
+    )
     
     return unlearned_model
 
@@ -769,8 +809,23 @@ def ssd(
         "selection_weighting": 10,  # Alpha from paper
     }
 
+    for key in list(parameters.keys()):
+        if hasattr(args, key):
+            value = getattr(args, key)
+            if value is not None:
+                parameters[key] = value
+
     # load the trained model
-    optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+    ssd_lr = float(getattr(args, "lr", 0.1))
+    ssd_optimizer_name = str(getattr(args, "optimizer", "sgd")).lower()
+    if ssd_optimizer_name == "adam":
+        optimizer = torch.optim.Adam(model.parameters(), lr=ssd_lr)
+    else:
+        optimizer = torch.optim.SGD(
+            model.parameters(),
+            lr=ssd_lr,
+            momentum=float(getattr(args, "momentum", 0.9)),
+        )
 
     pdr = ParameterPerturber(model, optimizer, device, parameters)
 

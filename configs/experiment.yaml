@@ -18,11 +18,13 @@ split:
 
 training:
   baseline:
-    epochs: 30
+    epochs: 100
     batch_size: 128
-    lr: 0.0001
-    optimizer: adam
-    momentum: 0.5
+    lr: 0.1
+    optimizer: sgd
+    momentum: 0.9
+    weight_decay: 0.0005
+    lr_scheduler: cosine
   unlearning:
     epochs: 1
     batch_size: 64
@@ -44,8 +46,27 @@ training:
         momentum: 0.9
         lr_decay_epochs: []
         lr_decay_rate: 0
-      ssd: {}
-      bad_teacher: {}
+      ssd:
+        # selection_weighting (α): selects synapses where forget_importance > α × retain_importance.
+        # Higher = more selective (fewer synapses modified). Default 10.
+        selection_weighting: 10
+        # dampening_constant (λ): each selected synapse is multiplied by (λ × oimp / fimp).
+        # Higher = less aggressive per synapse. Default 1 → weights oimp/fimp (<0.1 for selected).
+        # 5 → max 50% reduction at boundary; 10 → zero net change at boundary.
+        dampening_constant: 5
+        # Keep remaining SSD parameters at their defaults.
+        lower_bound: 1
+        exponent: 1
+        min_layer: -1
+        max_layer: -1
+        forget_threshold: 1
+      bad_teacher:
+        # epochs: number of distillation passes — primary driver of forgetting.
+        epochs: 5
+        # kl_temperature: softer distributions from higher T make distillation smoother.
+        kl_temperature: 4.0
+        # retain_subset_fraction: fraction of retain set used per epoch.
+        retain_subset_fraction: 0.3
       amnesiac: {}
 
 unlearning:

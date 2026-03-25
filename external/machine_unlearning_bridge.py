@@ -38,6 +38,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--lr", type=float, required=True)
     p.add_argument("--optimizer", required=True)
     p.add_argument("--momentum", type=float, required=True)
+    p.add_argument("--weight-decay", type=float, default=0.0)
+    p.add_argument("--lr-scheduler", default="none", choices=["none", "cosine"])
 
     p.add_argument("--unlearning-method", choices=list(SUPPORTED_UNLEARNING_METHODS))
     p.add_argument("--baseline-model")
@@ -46,13 +48,25 @@ def parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
-def train_baseline(model, train_loader, test_loader, device, epochs, lr, optimizer_name, momentum):
+def train_baseline(
+    model, train_loader, test_loader, device, epochs, lr, optimizer_name, momentum,
+    weight_decay: float = 0.0, lr_scheduler: str = "none"
+):
     if optimizer_name == "sgd":
-        optimizer = torch.optim.SGD(model.parameters(), lr=lr, momentum=momentum)
+        optimizer = torch.optim.SGD(
+            model.parameters(), lr=lr, momentum=momentum, weight_decay=weight_decay
+        )
     elif optimizer_name == "adam":
-        optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=1e-4)
+        optimizer = torch.optim.Adam(
+            model.parameters(), lr=lr, weight_decay=weight_decay if weight_decay > 0 else 1e-4
+        )
     else:
         raise ValueError(f"Unsupported baseline optimizer '{optimizer_name}'. Expected one of: ['sgd', 'adam']")
+
+    if lr_scheduler == "cosine":
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
+    else:
+        scheduler = None
 
     loss_func = nn.CrossEntropyLoss().to(device)
     best_state = None
@@ -68,6 +82,8 @@ def train_baseline(model, train_loader, test_loader, device, epochs, lr, optimiz
             loss = loss_func(output, labels)
             loss.backward()
             optimizer.step()
+        if scheduler is not None:
+            scheduler.step()
 
         model.eval()
         correct = 0
@@ -191,9 +207,56 @@ def _ignored_parameters(
     # Third-party strategy implementations for these methods currently use hard-coded
     # constants instead of args/method_cfg values.
     consumed_by_bridge = consumed_by_bridge or set()
+    consumed_by_strategy_map: dict[str, set[str]] = {
+        "scrub": {
+            "epochs",
+            "lr",
+            "distill_weight",
+            "forget_loss_weight",
+            "maximize_epochs",
+            "maximize_steps",
+            "minimize_steps",
+            "kd_temperature",
+            "weight_decay",
+            "momentum",
+            "lr_decay_epochs",
+            "lr_decay_rate",
+        },
+        "bad_teacher": {
+            "epochs",
+            "lr",
+            "batch_size",
+            "optimizer",
+            "momentum",
+            "kl_temperature",
+            "retain_subset_fraction",
+        },
+        "amnesiac": {
+            "epochs",
+            "batch_size",
+            "optimizer",
+        },
+        "ssd": {
+            "lr",
+            "optimizer",
+            "momentum",
+            "lower_bound",
+            "exponent",
+            "magnitude_diff",
+            "min_layer",
+            "max_layer",
+            "forget_threshold",
+            "dampening_constant",
+            "selection_weighting",
+        },
+    }
+    consumed_by_strategy = consumed_by_strategy_map.get(unlearning_method, set())
+
     ignored = []
     for key in sorted(method_cfg.keys()):
         if key in consumed_by_bridge:
+            continue
+        if key in consumed_by_strategy:
             continue
         ignored.append(
             {
@@ -282,6 +345,8 @@ def main() -> None:
             lr=args.lr,
             optimizer_name=args.optimizer,
             momentum=args.momentum,
+            weight_decay=args.weight_decay,
+            lr_scheduler=args.lr_scheduler,
         )
         unlearning_method = "baseline"
     else:

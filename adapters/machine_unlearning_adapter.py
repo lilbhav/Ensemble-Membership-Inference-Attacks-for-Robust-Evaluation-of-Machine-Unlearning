@@ -60,6 +60,10 @@ class MachineUnlearningAdapter:
             "--momentum",
             str(training_cfg["momentum"]),
         ]
+        if training_cfg.get("weight_decay") is not None:
+            cmd += ["--weight-decay", str(training_cfg["weight_decay"])]
+        if training_cfg.get("lr_scheduler"):
+            cmd += ["--lr-scheduler", str(training_cfg["lr_scheduler"])]
         # Execute from repo root so relative imports/paths in bridge remain stable
         run_subprocess(cmd, cwd=self.project_root)
 
