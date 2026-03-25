@@ -300,7 +300,6 @@ def run_scrub(
             ),
             flush=True,
         )
-        )
 
     return model_s, history_rows
 
