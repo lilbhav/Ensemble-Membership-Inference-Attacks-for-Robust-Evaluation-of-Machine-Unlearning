@@ -106,8 +106,9 @@ def train_baseline(model, train_loader, test_loader, device, epochs, lr, optimiz
 
 
 def parse_int_list(value: str | None, default: list[int]) -> list[int]:
-    if not value:
+    if value is None:
         return default
+    # Empty string means explicitly no decay epochs
     return [int(part.strip()) for part in value.split(",") if part.strip()]
 
 
@@ -237,6 +238,9 @@ def run_scrub(
             lr_decay_rate=float(scrub_cfg["lr_decay_rate"]),
         )
 
+        total_epochs = int(scrub_cfg["epochs"])
+        print(f"SCRUB epoch {epoch}/{total_epochs} — training...", flush=True)
+
         maximize_loss = 0.0
         if epoch <= int(scrub_cfg["maximize_epochs"]):
             maximize_losses = []
@@ -290,8 +294,12 @@ def run_scrub(
         }
         history_rows.append(row)
         print(
-            "SCRUB epoch {epoch}: lr={lr:.6f} forget_acc={forget_acc:.4f} retain_acc={retain_acc:.4f} "
-            "test_acc={test_acc:.4f} forget_loss={forget_loss:.6f} retain_loss={retain_loss:.6f}".format(**row)
+            "SCRUB epoch {epoch}/{total_epochs}: lr={lr:.6f} forget_acc={forget_acc:.4f} retain_acc={retain_acc:.4f} "
+            "test_acc={test_acc:.4f} forget_loss={forget_loss:.6f} retain_loss={retain_loss:.6f}".format(
+                total_epochs=total_epochs, **row
+            ),
+            flush=True,
+        )
         )
 
     return model_s, history_rows

@@ -138,7 +138,7 @@ class MachineUnlearningAdapter:
                 if key in scrub_cfg and scrub_cfg[key] is not None:
                     cmd.extend([flag, str(scrub_cfg[key])])
 
-            if "lr_decay_epochs" in scrub_cfg and scrub_cfg["lr_decay_epochs"]:
+            if "lr_decay_epochs" in scrub_cfg:
                 decay_epochs = ",".join(str(x) for x in scrub_cfg["lr_decay_epochs"])
                 cmd.extend(["--scrub-lr-decay-epochs", decay_epochs])
 

@@ -76,10 +76,23 @@ def write_csv(path: str | Path, rows: list[dict[str, Any]], fieldnames: list[str
 
 
 def run_subprocess(cmd: list[str], cwd: str | Path | None = None) -> None:
-    # Run external engine command and raise with full logs on failure
-    proc = subprocess.run(cmd, cwd=str(cwd) if cwd else None, text=True, capture_output=True)
+    # Run external engine command, streaming stdout live and raising with full logs on failure
+    proc = subprocess.Popen(
+        cmd,
+        cwd=str(cwd) if cwd else None,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    stdout_lines: list[str] = []
+    assert proc.stdout is not None
+    for line in proc.stdout:
+        print(line, end="", flush=True)
+        stdout_lines.append(line)
+    stderr_output = proc.stderr.read() if proc.stderr else ""
+    proc.wait()
     if proc.returncode != 0:
         joined = " ".join(cmd)
         raise RuntimeError(
-            f"Subprocess failed ({proc.returncode}): {joined}\nSTDOUT:\n{proc.stdout}\nSTDERR:\n{proc.stderr}"
+            f"Subprocess failed ({proc.returncode}): {joined}\nSTDOUT:\n{''.join(stdout_lines)}\nSTDERR:\n{stderr_output}"
         )
