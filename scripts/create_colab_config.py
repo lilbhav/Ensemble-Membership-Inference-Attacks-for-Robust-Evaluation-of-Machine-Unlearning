@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 
 import yaml
+
+# Add project root to path so imports work regardless of cwd
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 
 def parse_args() -> argparse.Namespace:
