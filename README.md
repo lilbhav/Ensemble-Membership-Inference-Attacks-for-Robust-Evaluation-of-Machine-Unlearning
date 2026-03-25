@@ -101,3 +101,78 @@ Run from repository root:
 6. `python scripts/aggregate_results.py`
 
 Each script supports focused reruns (single dataset/seed/method/attack) via CLI flags.
+
+---
+
+# Colab-First Run (With Google Drive Checkpoints)
+
+Use this flow if you want all outputs/checkpoints to persist in Google Drive.
+
+## 1) Notebook setup
+
+```python
+from google.colab import drive
+drive.mount('/content/drive')
+```
+
+```bash
+%cd /content
+!git clone https://github.com/chavab/Ensemble-Membership-Inference-Attacks-for-Robust-Evaluation-of-Machine-Unlearning.git
+%cd /content/Ensemble-Membership-Inference-Attacks-for-Robust-Evaluation-of-Machine-Unlearning
+!pip install -q -r requirements-colab.txt
+```
+
+## 2) Create/update Colab config
+
+```bash
+!python scripts/create_colab_config.py \
+  --template configs/experiment.yaml \
+  --out configs/experiment_colab.yaml \
+  --repo-root /content/Ensemble-Membership-Inference-Attacks-for-Robust-Evaluation-of-Machine-Unlearning \
+  --drive-root /content/drive/MyDrive/unlearning_runs \
+  --dataset Cifar10
+```
+
+This writes:
+
+- Data to `/content/drive/MyDrive/unlearning_runs/data`
+- Models/checkpoints/results to `/content/drive/MyDrive/unlearning_runs/results`
+
+## 3) Run your exact basic pipeline
+
+Option A: single command wrapper
+
+```bash
+!python scripts/run_basic_colab.py \
+  --config configs/experiment_colab.yaml \
+  --dataset Cifar10 \
+  --seed 0 \
+  --method scrub \
+  --attack yeom \
+  --target forget_vs_test \
+  --attack-seed 0
+```
+
+Option B: run each step manually
+
+```bash
+%cd /content/Ensemble-Membership-Inference-Attacks-for-Robust-Evaluation-of-Machine-Unlearning/scripts
+!python prepare_splits.py --config ../configs/experiment_colab.yaml --dataset Cifar10 --seed 0
+!python run_baseline.py --config ../configs/experiment_colab.yaml --dataset Cifar10 --seed 0
+!python run_unlearning.py --config ../configs/experiment_colab.yaml --dataset Cifar10 --seed 0 --method scrub
+!python run_mia.py --config ../configs/experiment_colab.yaml --dataset Cifar10 --seed 0 --method scrub --attack yeom --target forget_vs_test --attack-seed 0
+!python run_ensemble_eval.py --config ../configs/experiment_colab.yaml --dataset Cifar10 --seed 0
+!python aggregate_results.py --config ../configs/experiment_colab.yaml
+```
+
+## 4) Output locations
+
+- Baseline checkpoint:
+  - `/content/drive/MyDrive/unlearning_runs/results/models/Cifar10/seed_0/baseline.pt`
+- Unlearned checkpoint:
+  - `/content/drive/MyDrive/unlearning_runs/results/models/Cifar10/seed_0/unlearn_scrub.pt`
+- MIA outputs:
+  - `/content/drive/MyDrive/unlearning_runs/results/mia/...`
+- Ensemble and aggregate outputs:
+  - `/content/drive/MyDrive/unlearning_runs/results/ensemble/...`
+  - `/content/drive/MyDrive/unlearning_runs/results/aggregate/...`
