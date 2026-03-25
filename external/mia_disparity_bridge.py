@@ -146,6 +146,10 @@ def main() -> None:
     engine_repo = Path(args.engine_repo).resolve()
     if not engine_repo.exists():
         raise FileNotFoundError(f"mia-disparity repo not found: {engine_repo}")
+    if not (engine_repo / "miae" / "__init__.py").exists():
+        raise FileNotFoundError(
+            f"mia-disparity repo is missing expected package layout at: {engine_repo / 'miae'}"
+        )
 
     sys.path.insert(0, str(engine_repo))
 
@@ -158,6 +162,10 @@ def main() -> None:
 
     # Load dataset/model definitions from external repos
     mu_repo = engine_repo.parent / "MachineUnlearning"
+    if not (mu_repo / "src" / "__init__.py").exists():
+        raise FileNotFoundError(
+            f"Sibling MachineUnlearning repo is missing expected package layout at: {mu_repo / 'src'}"
+        )
     sys.path.insert(0, str(mu_repo))
 
     from src import dataset as mu_dataset  # type: ignore

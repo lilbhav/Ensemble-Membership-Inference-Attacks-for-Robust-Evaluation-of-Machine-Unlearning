@@ -152,3 +152,16 @@ Run these commands:
 - Ensemble and aggregate outputs:
   - `/content/drive/MyDrive/unlearning_runs/results/ensemble/...`
   - `/content/drive/MyDrive/unlearning_runs/results/aggregate/...`
+
+## Troubleshooting (Colab)
+
+- Error: `ModuleNotFoundError: No module named 'src'` during `prepare_splits.py`
+  - Cause: `Third_Party_Code/MachineUnlearning` is missing or not in expected layout.
+  - Fix:
+    1. Ensure you cloned this repository fresh in Colab runtime.
+    2. Verify path exists: `/content/Ensemble-Membership-Inference-Attacks-for-Robust-Evaluation-of-Machine-Unlearning/Third_Party_Code/MachineUnlearning/src/__init__.py`
+    3. Re-run `prepare_splits.py` before baseline/unlearning/MIA.
+
+- Error: missing split file in later stages
+  - Cause: `prepare_splits.py` failed earlier, so downstream scripts cannot find `seed_0.npz`.
+  - Fix: resolve split-generation error first, then rerun pipeline from `prepare_splits.py` onward.

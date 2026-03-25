@@ -84,6 +84,10 @@ def main() -> None:
     engine_repo = Path(args.engine_repo).resolve()
     if not engine_repo.exists():
         raise FileNotFoundError(f"MachineUnlearning repo not found: {engine_repo}")
+    if not (engine_repo / "src" / "__init__.py").exists():
+        raise FileNotFoundError(
+            f"MachineUnlearning repo is missing expected package layout at: {engine_repo / 'src'}"
+        )
 
     sys.path.insert(0, str(engine_repo))
     from src import dataset as mu_dataset  # type: ignore

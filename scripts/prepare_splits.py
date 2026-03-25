@@ -47,12 +47,29 @@ def _stratified_partition(indices: np.ndarray, labels: np.ndarray, ratios: dict[
     return {k: np.concatenate(v).astype(np.int64) if len(v) > 0 else np.array([], dtype=np.int64) for k, v in out.items()}
 
 
+def _resolve_machine_unlearning_repo(cfg_repo_path: str | Path) -> Path:
+    # First, trust config path resolution.
+    candidate = resolve_path(cfg_repo_path)
+    if (candidate / "src" / "__init__.py").exists():
+        return candidate
+
+    # Fallback to the repository-local default location used in this project.
+    fallback = Path(__file__).resolve().parents[1] / "Third_Party_Code" / "MachineUnlearning"
+    if (fallback / "src" / "__init__.py").exists():
+        return fallback
+
+    raise FileNotFoundError(
+        "Could not locate MachineUnlearning repo with a valid 'src' package. "
+        f"Checked: {candidate} and {fallback}."
+    )
+
+
 def main() -> None:
     # 1) Read config and resolve roots
     args = parse_args()
     cfg = load_config(args.config)
 
-    mu_repo = resolve_path(cfg["paths"]["machine_unlearning_repo"])
+    mu_repo = _resolve_machine_unlearning_repo(cfg["paths"]["machine_unlearning_repo"])
     data_root = resolve_path(cfg["paths"]["data_root"])
     results_root = resolve_path(cfg["paths"]["results_root"])
     split_root = ensure_dir(results_root / "splits")
