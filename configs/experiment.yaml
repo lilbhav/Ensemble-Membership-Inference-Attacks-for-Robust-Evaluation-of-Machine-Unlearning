@@ -29,6 +29,35 @@ training:
     lr: 0.0001
     optimizer: adam
     momentum: 0.5
+    scrub:
+      mode: teacher_loaded
+      epochs: 6
+      lr: 0.0005
+      distill_weight: 0.001
+      forget_loss_weight: 1.0
+      maximize_epochs: 3
+      maximize_steps: 1
+      minimize_steps: 1
+      kd_temperature: 4.0
+      weight_decay: 0.0005
+      momentum: 0.9
+      lr_decay_epochs: [3, 5, 9]
+      lr_decay_rate: 0.1
+    scrub_sweep:
+      - name: scrub_original_default
+        method: scrub_original
+      - name: scrub_teacher_loaded_default
+        method: scrub_teacher_loaded
+      - name: scrub_teacher_loaded_stronger_forget
+        method: scrub_teacher_loaded
+        epochs: 8
+        forget_loss_weight: 2.0
+        maximize_epochs: 4
+      - name: scrub_teacher_loaded_more_retain
+        method: scrub_teacher_loaded
+        epochs: 8
+        distill_weight: 0.005
+        minimize_steps: 2
 
 unlearning:
   methods: [scrub, ssd, bad_teacher, amnesiac]

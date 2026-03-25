@@ -20,7 +20,11 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--config", default="configs/experiment.yaml")
     p.add_argument("--dataset")
     p.add_argument("--seed", type=int)
-    p.add_argument("--method", required=True, choices=["scrub", "ssd", "bad_teacher", "amnesiac"])
+    p.add_argument(
+        "--method",
+        required=True,
+        choices=["scrub", "scrub_original", "scrub_teacher_loaded", "ssd", "bad_teacher", "amnesiac"],
+    )
     p.add_argument(
         "--retrain-baseline",
         action="store_true",
