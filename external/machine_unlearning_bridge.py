@@ -6,11 +6,19 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
+import collections.abc
+
 import numpy as np
 import torch
 from torch import nn
 from torch.utils.data import ConcatDataset, DataLoader, Subset
 from tqdm import tqdm
+
+# Python 3.12 requires random.sample's population to be a collections.abc.Sequence.
+# torch.utils.data.Subset supports __getitem__ and __len__ but is not registered as
+# a Sequence, so bad_teacher's random.sample call fails.  Register it once here
+# so all strategy calls in this bridge work without touching third-party code.
+collections.abc.Sequence.register(Subset)
 
 
 def parse_args() -> argparse.Namespace:
