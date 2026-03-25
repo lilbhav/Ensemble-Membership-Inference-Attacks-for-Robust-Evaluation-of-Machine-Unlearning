@@ -183,11 +183,18 @@ def _validate_split_and_meta(
     }
 
 
-def _ignored_parameters(unlearning_method: str, method_cfg: dict[str, Any]) -> list[dict[str, str]]:
+def _ignored_parameters(
+    unlearning_method: str,
+    method_cfg: dict[str, Any],
+    consumed_by_bridge: set[str] | None = None,
+) -> list[dict[str, str]]:
     # Third-party strategy implementations for these methods currently use hard-coded
     # constants instead of args/method_cfg values.
+    consumed_by_bridge = consumed_by_bridge or set()
     ignored = []
     for key in sorted(method_cfg.keys()):
+        if key in consumed_by_bridge:
+            continue
         ignored.append(
             {
                 "parameter": key,
@@ -260,6 +267,8 @@ def main() -> None:
     method_cfg: dict[str, Any] = {}
     strategy_args_payload: dict[str, Any] = {}
     ignored_params: list[dict[str, str]] = []
+    consumed_method_cfg_keys_by_bridge: set[str] = set()
+    scrub_teacher_source = None
 
     if args.mode == "baseline":
         train_loader = DataLoader(baseline_train_ds, batch_size=args.batch_size, shuffle=True)
@@ -310,12 +319,29 @@ def main() -> None:
         strategy_args = SimpleNamespace(**strategy_args_payload)
 
         unlearning_teacher = getattr(mu_models, "ResNet18")(num_classes=num_classes, input_channels=num_channels).to(device)
+        if args.unlearning_method == "scrub":
+            scrub_mode = str(method_cfg.get("mode", "teacher_loaded"))
+            if scrub_mode not in {"teacher_loaded", "random_init"}:
+                raise ValueError(
+                    "Invalid scrub mode in method config. Supported values: ['teacher_loaded', 'random_init']"
+                )
+            consumed_method_cfg_keys_by_bridge.add("mode")
+            if scrub_mode == "teacher_loaded":
+                unlearning_teacher.load_state_dict(torch.load(baseline_model_path, map_location=device))
+                scrub_teacher_source = str(baseline_model_path)
+            else:
+                scrub_teacher_source = "random_init_resnet18"
+
         retain_loader = DataLoader(retain_ds, batch_size=args.batch_size, shuffle=True)
         forget_loader = DataLoader(forget_ds, batch_size=args.batch_size, shuffle=False)
         test_loader = DataLoader(test_ds, batch_size=args.batch_size, shuffle=False)
 
         strategy_fn_name = f"unlearn_strategies.strategies.{args.unlearning_method}"
-        ignored_params = _ignored_parameters(args.unlearning_method, method_cfg)
+        ignored_params = _ignored_parameters(
+            args.unlearning_method,
+            method_cfg,
+            consumed_by_bridge=consumed_method_cfg_keys_by_bridge,
+        )
 
         print("Unlearning bridge verification")
         print(f"  method={args.unlearning_method}")
@@ -329,6 +355,8 @@ def main() -> None:
             f"retain_samples={len(retain_ds)}, forget_samples={len(forget_ds)}, test_samples={len(test_ds)}, "
             f"retain_batches={len(retain_loader)}, forget_batches={len(forget_loader)}, test_batches={len(test_loader)}"
         )
+        if scrub_teacher_source is not None:
+            print(f"  scrub_teacher_source={scrub_teacher_source}")
         print(f"  method_hyperparameters_passed={method_cfg}")
         if ignored_params:
             print("  ignored_method_parameters_detected=True")
@@ -392,6 +420,8 @@ def main() -> None:
             "test_batches": int(len(DataLoader(test_ds, batch_size=args.batch_size, shuffle=False))),
         },
         "method_hyperparameters_passed": method_cfg,
+        "consumed_method_cfg_keys_by_bridge": sorted(consumed_method_cfg_keys_by_bridge),
+        "scrub_teacher_source": scrub_teacher_source,
         "strategy_args_payload": strategy_args_payload,
         "ignored_method_parameters": ignored_params,
     }
