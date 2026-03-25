@@ -38,6 +38,31 @@ def merge_scrub_config(base_cfg: dict, override_cfg: dict) -> dict:
     return merged
 
 
+def resolve_scrub_config(unlearning_cfg: dict) -> tuple[dict, list[dict]]:
+    method_cfgs = unlearning_cfg.get("methods", {})
+    scrub_base_cfg = {}
+    if isinstance(method_cfgs, dict):
+        scrub_base_cfg = method_cfgs.get("scrub", {}) or {}
+
+    # Backward compatibility for older configs that stored SCRUB directly under
+    # training.unlearning.scrub instead of training.unlearning.methods.scrub.
+    if not scrub_base_cfg:
+        legacy_scrub_cfg = unlearning_cfg.get("scrub", {})
+        if isinstance(legacy_scrub_cfg, dict):
+            scrub_base_cfg = legacy_scrub_cfg
+
+    sweep_entries = unlearning_cfg.get("scrub_sweep", [])
+    if not sweep_entries:
+        sweep_entries = [{"name": "scrub_default"}]
+
+    if not isinstance(scrub_base_cfg, dict):
+        raise ValueError("SCRUB config must be a dictionary.")
+    if not isinstance(sweep_entries, list):
+        raise ValueError("training.unlearning.scrub_sweep must be a list when provided.")
+
+    return scrub_base_cfg, sweep_entries
+
+
 def main() -> None:
     args = parse_args()
     cfg = load_config(args.config)
@@ -72,10 +97,7 @@ def main() -> None:
     baseline_metrics = load_json(baseline_metrics_path)
     unlearning_cfg = cfg["training"]["unlearning"]
     method_cfgs = unlearning_cfg.get("methods", {})
-    scrub_base_cfg = method_cfgs.get("scrub", {})
-    sweep_entries = unlearning_cfg.get("scrub_sweep", [])
-    if not sweep_entries:
-        raise ValueError("No SCRUB sweep entries configured under training.unlearning.scrub_sweep")
+    scrub_base_cfg, sweep_entries = resolve_scrub_config(unlearning_cfg)
 
     rows = []
     for entry in sweep_entries:
@@ -88,7 +110,7 @@ def main() -> None:
 
         if args.rerun or not model_out.exists() or not metrics_path.exists():
             training_cfg = dict(unlearning_cfg)
-            training_cfg["methods"] = dict(method_cfgs)
+            training_cfg["methods"] = dict(method_cfgs) if isinstance(method_cfgs, dict) else {}
             training_cfg["methods"]["scrub"] = scrub_cfg
             adapter.run_unlearning(
                 dataset=args.dataset,
