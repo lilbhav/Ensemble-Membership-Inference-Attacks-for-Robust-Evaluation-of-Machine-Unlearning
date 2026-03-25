@@ -18,33 +18,131 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--config", default="configs/experiment.yaml")
     p.add_argument("--dataset")
     p.add_argument("--seed", type=int)
+    p.add_argument(
+        "--force-overwrite",
+        action="store_true",
+        help="Overwrite existing split artifacts even when metadata does not match current config.",
+    )
     return p.parse_args()
 
 
-def _stratified_partition(indices: np.ndarray, labels: np.ndarray, ratios: dict[str, float], rng: np.random.Generator):
-    # Split each class independently so forget/aux ratios are balanced across labels
-    class_ids = np.unique(labels)
-    out = {"forget": [], "aux": [], "retain": []}
+def _targeted_random_partition(
+    indices: np.ndarray,
+    labels: np.ndarray,
+    target_class: int,
+    forget_fraction: float | None,
+    forget_count: int | None,
+    rng: np.random.Generator,
+) -> tuple[dict[str, np.ndarray], dict[str, float | int]]:
+    target_mask = labels == target_class
+    target_indices = indices[target_mask]
 
-    for cls in class_ids:
-        cls_idxs = indices[labels == cls]
-        rng.shuffle(cls_idxs)
+    if target_indices.size == 0:
+        raise ValueError(f"No samples found for target_class={target_class}.")
 
-        n = len(cls_idxs)
-        n_forget = int(round(n * ratios["forget"]))
-        n_aux = int(round(n * ratios["aux"]))
-        n_forget = min(n_forget, n)
-        n_aux = min(n_aux, n - n_forget)
+    if (forget_fraction is None) == (forget_count is None):
+        raise ValueError("Exactly one of split.forget_fraction or split.forget_count must be provided.")
 
-        forget = cls_idxs[:n_forget]
-        aux = cls_idxs[n_forget:n_forget + n_aux]
-        retain = cls_idxs[n_forget + n_aux:]
+    if forget_fraction is not None:
+        if forget_fraction <= 0 or forget_fraction > 1:
+            raise ValueError("split.forget_fraction must be in (0, 1].")
+        computed_forget_count = int(round(target_indices.size * forget_fraction))
+    else:
+        if forget_count is None or forget_count <= 0:
+            raise ValueError("split.forget_count must be a positive integer.")
+        if forget_count > int(target_indices.size):
+            raise ValueError(
+                f"split.forget_count={forget_count} exceeds available target-class samples ({target_indices.size})."
+            )
+        computed_forget_count = int(forget_count)
 
-        out["forget"].append(forget)
-        out["aux"].append(aux)
-        out["retain"].append(retain)
+    if computed_forget_count <= 0:
+        raise ValueError(
+            "Computed forget_count is zero. Increase split.forget_fraction or set split.forget_count explicitly."
+        )
 
-    return {k: np.concatenate(v).astype(np.int64) if len(v) > 0 else np.array([], dtype=np.int64) for k, v in out.items()}
+    shuffled_target = target_indices.copy()
+    rng.shuffle(shuffled_target)
+    forget = np.sort(shuffled_target[:computed_forget_count]).astype(np.int64)
+    retain = np.sort(np.setdiff1d(indices, forget, assume_unique=False)).astype(np.int64)
+    aux = np.array([], dtype=np.int64)
+
+    realized_forget_fraction = float(len(forget) / target_indices.size)
+
+    metadata = {
+        "target_class_size": int(target_indices.size),
+        "forget_count": int(len(forget)),
+        "forget_fraction": realized_forget_fraction,
+    }
+    return {"forget": forget, "retain": retain, "aux": aux}, metadata
+
+
+def _expected_split_metadata(
+    dataset_name: str,
+    seed: int,
+    target_class: int,
+    forget_fraction: float | None,
+    forget_count: int | None,
+) -> dict[str, object]:
+    forget_spec = "fraction" if forget_fraction is not None else "count"
+    return {
+        "split_mode": "targeted_random",
+        "dataset": dataset_name,
+        "seed": int(seed),
+        "target_class": int(target_class),
+        "forget_spec": forget_spec,
+        "requested_forget_fraction": None if forget_fraction is None else float(forget_fraction),
+        "requested_forget_count": None if forget_count is None else int(forget_count),
+    }
+
+
+def _validate_existing_meta(meta_file: Path, expected: dict[str, object]) -> tuple[bool, str]:
+    if not meta_file.exists():
+        return False, f"Missing metadata file: {meta_file}"
+
+    with meta_file.open("r", encoding="utf-8") as f:
+        meta = json.load(f)
+
+    required_keys = [
+        "split_mode",
+        "dataset",
+        "seed",
+        "target_class",
+        "forget_spec",
+        "requested_forget_fraction",
+        "requested_forget_count",
+        "forget_fraction",
+        "forget_count",
+    ]
+    for key in required_keys:
+        if key not in meta:
+            return False, f"Split metadata missing required key '{key}' in {meta_file}"
+
+    if meta["split_mode"] != "targeted_random":
+        return False, f"Unsupported split_mode in existing metadata: {meta['split_mode']}"
+
+    mismatches = []
+    always_checked = ["split_mode", "dataset", "seed", "target_class", "forget_spec"]
+    for key in always_checked:
+        expected_value = expected[key]
+        actual_value = meta.get(key)
+        if actual_value != expected_value:
+            mismatches.append(f"{key}: expected={expected_value}, actual={actual_value}")
+
+    if expected["forget_spec"] == "fraction":
+        expected_value = expected["requested_forget_fraction"]
+        actual_value = meta.get("requested_forget_fraction")
+        if actual_value != expected_value:
+            mismatches.append(f"requested_forget_fraction: expected={expected_value}, actual={actual_value}")
+    else:
+        expected_value = expected["requested_forget_count"]
+        actual_value = meta.get("requested_forget_count")
+        if actual_value != expected_value:
+            mismatches.append(f"requested_forget_count: expected={expected_value}, actual={actual_value}")
+
+    if mismatches:
+        return False, "; ".join(mismatches)
+    return True, ""
 
 
 def _resolve_machine_unlearning_repo(cfg_repo_path: str | Path) -> Path:
@@ -84,8 +182,19 @@ def main() -> None:
     datasets = [args.dataset] if args.dataset else cfg["experiment"]["datasets"]
     seeds = [args.seed] if args.seed is not None else cfg["experiment"]["base_seeds"]
 
-    forget_fraction = float(cfg["split"]["forget_fraction"])
-    aux_fraction = float(cfg["split"]["aux_fraction"])
+    split_cfg = cfg["split"]
+    if split_cfg.get("split_mode") != "targeted_random":
+        raise ValueError("Only split_mode=targeted_random is supported.")
+
+    if "target_class" not in split_cfg:
+        raise ValueError("split.target_class is required for targeted_random splits.")
+
+    target_class = int(split_cfg["target_class"])
+    forget_fraction_cfg = split_cfg.get("forget_fraction")
+    forget_count_cfg = split_cfg.get("forget_count")
+
+    forget_fraction = None if forget_fraction_cfg is None else float(forget_fraction_cfg)
+    forget_count = None if forget_count_cfg is None else int(forget_count_cfg)
 
     for dataset_name in datasets:
         train_dataset, test_dataset, _, _ = mu_dataset.get_dataset(dataset_name=dataset_name, root=str(data_root), augment=False)
@@ -99,33 +208,59 @@ def main() -> None:
             # Use deterministic RNG so the same seed always recreates the same split
             rng = np.random.default_rng(seed)
 
-            if cfg["split"].get("stratified_by_label", True):
-                parts = _stratified_partition(
-                    indices=train_indices.copy(),
-                    labels=labels,
-                    ratios={"forget": forget_fraction, "aux": aux_fraction},
-                    rng=rng,
-                )
-            else:
-                shuffled = train_indices.copy()
-                rng.shuffle(shuffled)
-                n_forget = int(round(train_size * forget_fraction))
-                n_aux = int(round(train_size * aux_fraction))
-                parts = {
-                    "forget": shuffled[:n_forget],
-                    "aux": shuffled[n_forget:n_forget + n_aux],
-                    "retain": shuffled[n_forget + n_aux:],
-                }
-
-            test_indices = np.arange(test_size, dtype=np.int64)
-            test_fraction = float(cfg["split"].get("test_fraction", 1.0))
-            if test_fraction < 1.0:
-                # Optional test downsampling for faster experiments
-                rng.shuffle(test_indices)
-                test_indices = np.sort(test_indices[: int(round(test_size * test_fraction))])
-
             split_file = split_root / dataset_name / f"seed_{seed}.npz"
             split_file.parent.mkdir(parents=True, exist_ok=True)
+            meta_file = split_root / dataset_name / f"seed_{seed}.meta.json"
+
+            expected = _expected_split_metadata(
+                dataset_name=dataset_name,
+                seed=seed,
+                target_class=target_class,
+                forget_fraction=forget_fraction,
+                forget_count=forget_count,
+            )
+
+            if split_file.exists() or meta_file.exists():
+                is_compatible, reason = _validate_existing_meta(meta_file, expected)
+                if is_compatible and split_file.exists():
+                    print(f"Reusing existing targeted_random split: {split_file}")
+                    continue
+                if not args.force_overwrite:
+                    raise RuntimeError(
+                        "Existing split artifacts are incompatible with current config. "
+                        "Refusing to reuse silently. "
+                        f"Reason: {reason}. "
+                        "Rerun with --force-overwrite to regenerate artifacts."
+                    )
+
+            parts, derived = _targeted_random_partition(
+                indices=train_indices.copy(),
+                labels=labels,
+                target_class=target_class,
+                forget_fraction=forget_fraction,
+                forget_count=forget_count,
+                rng=rng,
+            )
+
+            forget_labels = labels[parts["forget"]] if len(parts["forget"]) > 0 else np.array([], dtype=np.int64)
+            if not np.all(forget_labels == target_class):
+                raise AssertionError("Found forget samples outside the selected target_class.")
+            if np.intersect1d(parts["retain"], parts["forget"]).size > 0:
+                raise AssertionError("retain_indices and forget_indices must be disjoint.")
+
+            if forget_count is not None and len(parts["forget"]) != forget_count:
+                raise AssertionError(
+                    f"Forget count mismatch: expected {forget_count}, got {len(parts['forget'])}."
+                )
+            if forget_fraction is not None:
+                expected_from_fraction = int(round(derived["target_class_size"] * forget_fraction))
+                if len(parts["forget"]) != expected_from_fraction:
+                    raise AssertionError(
+                        "Forget count mismatch against forget_fraction within target class: "
+                        f"expected {expected_from_fraction}, got {len(parts['forget'])}."
+                    )
+
+            test_indices = np.arange(test_size, dtype=np.int64)
             np.savez(
                 split_file,
                 retain_indices=np.sort(parts["retain"]),
@@ -136,8 +271,15 @@ def main() -> None:
 
             # Save a human-readable companion file with split stats
             meta = {
+                "split_mode": "targeted_random",
                 "dataset": dataset_name,
                 "seed": seed,
+                "target_class": target_class,
+                "forget_spec": "fraction" if forget_fraction is not None else "count",
+                "requested_forget_fraction": forget_fraction,
+                "requested_forget_count": forget_count,
+                "forget_count": int(derived["forget_count"]),
+                "forget_fraction": float(derived["forget_fraction"]),
                 "train_size": train_size,
                 "test_size": test_size,
                 "counts": {
@@ -147,16 +289,17 @@ def main() -> None:
                     "aux": int(len(parts["aux"])),
                 },
                 "fractions": {
-                    "forget_fraction": forget_fraction,
-                    "aux_fraction": aux_fraction,
-                    "test_fraction": test_fraction,
+                    "forget_fraction_within_target_class": float(derived["forget_fraction"]),
                 },
             }
-            meta_file = split_root / dataset_name / f"seed_{seed}.meta.json"
             with meta_file.open("w", encoding="utf-8") as f:
                 json.dump(meta, f, indent=2)
 
-            print(f"Saved split: {split_file}")
+            print(
+                "Saved targeted_random split: "
+                f"{split_file} (target_class={target_class}, forget_count={derived['forget_count']}, "
+                f"forget_fraction_within_target_class={derived['forget_fraction']:.6f})"
+            )
 
 
 if __name__ == "__main__":

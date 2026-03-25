@@ -104,6 +104,24 @@ def main() -> None:
     forget_indices = split_data["forget_indices"].tolist()
     test_indices = split_data["test_indices"].tolist()
 
+    split_path = Path(args.split_file)
+    split_meta_path = split_path.with_suffix(".meta.json")
+    if not split_meta_path.exists():
+        raise FileNotFoundError(f"Missing split metadata file: {split_meta_path}")
+
+    with split_meta_path.open("r", encoding="utf-8") as f:
+        split_meta = json.load(f)
+
+    if split_meta.get("split_mode") != "targeted_random":
+        raise ValueError(
+            f"Unsupported split_mode in metadata ({split_meta.get('split_mode')}). "
+            "Only targeted_random is supported."
+        )
+    if "target_class" not in split_meta:
+        raise ValueError(f"Split metadata is missing required key 'target_class': {split_meta_path}")
+
+    target_class = int(split_meta["target_class"])
+
     train_dataset, test_dataset, num_classes, num_channels = mu_dataset.get_dataset(
         dataset_name=args.dataset,
         root=args.data_root,
@@ -151,7 +169,14 @@ def main() -> None:
         forget_loader = DataLoader(forget_ds, batch_size=args.batch_size, shuffle=False)
         test_loader = DataLoader(test_ds, batch_size=args.batch_size, shuffle=False)
 
-        first_forget_label = int(forget_ds[0][1]) if len(forget_ds) > 0 else 0
+        if len(forget_ds) == 0:
+            raise ValueError("forget_ds is empty; targeted_random split must include at least one forget sample.")
+
+        # Guard against stale/incorrect split files by validating forget labels against metadata target_class.
+        observed_labels = [int(forget_ds[i][1]) for i in range(len(forget_ds))]
+        if not all(lbl == target_class for lbl in observed_labels):
+            raise AssertionError("Split metadata target_class does not match forget-set labels.")
+
         strategy_args = SimpleNamespace(
             epochs=args.epochs,
             batch_size=args.batch_size,
@@ -169,7 +194,7 @@ def main() -> None:
             args=strategy_args,
             model=model,
             unlearning_teacher=unlearning_teacher,
-            unlearn_class=first_forget_label,
+            unlearn_class=target_class,
             unlearn_loader=forget_loader,
             retain_loader=retain_loader,
             test_loader=test_loader,
@@ -180,11 +205,13 @@ def main() -> None:
         unlearning_method = args.unlearning_method
 
     # Report basic utility metrics for downstream aggregation
+    train_loader_eval = DataLoader(baseline_train_ds, batch_size=args.batch_size, shuffle=False)
     retain_loader_eval = DataLoader(retain_ds, batch_size=args.batch_size, shuffle=False)
     forget_loader_eval = DataLoader(forget_ds, batch_size=args.batch_size, shuffle=False)
     test_loader_eval = DataLoader(test_ds, batch_size=args.batch_size, shuffle=False)
 
     metrics = {
+        "train_acc": mu_metrics.evaluate(model, train_loader_eval, device)["Acc"],
         "retain_acc": mu_metrics.evaluate(model, retain_loader_eval, device)["Acc"],
         "forget_acc": mu_metrics.evaluate(model, forget_loader_eval, device)["Acc"],
         "test_acc": mu_metrics.evaluate(model, test_loader_eval, device)["Acc"],
@@ -192,6 +219,10 @@ def main() -> None:
         "seed": args.seed,
         "mode": args.mode,
         "unlearning_method": unlearning_method,
+        "split_mode": "targeted_random",
+        "target_class": target_class,
+        "forget_count": int(split_meta.get("forget_count", len(forget_indices))),
+        "forget_fraction": split_meta.get("forget_fraction"),
     }
 
     # Save model checkpoint and adjacent metrics JSON

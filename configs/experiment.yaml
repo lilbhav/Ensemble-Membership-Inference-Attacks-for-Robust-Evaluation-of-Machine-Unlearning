@@ -11,10 +11,10 @@ experiment:
   device: cuda
 
 split:
-  forget_fraction: 0.1
-  aux_fraction: 0.2
-  test_fraction: 1.0
-  stratified_by_label: true
+  split_mode: targeted_random
+  target_class: 0
+  forget_fraction: 0.1  # Fraction within the selected target_class, not the full training set.
+  forget_count: null
 
 training:
   baseline:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import sys
 from pathlib import Path
 
@@ -160,6 +161,26 @@ def main() -> None:
     test_indices = split_data["test_indices"].tolist()
     aux_indices = split_data["aux_indices"].tolist() if "aux_indices" in split_data.files else []
 
+    split_path = Path(args.split_file)
+    split_meta_path = split_path.with_suffix(".meta.json")
+    if not split_meta_path.exists():
+        raise FileNotFoundError(f"Missing split metadata file: {split_meta_path}")
+
+    with split_meta_path.open("r", encoding="utf-8") as f:
+        split_meta = json.load(f)
+
+    if split_meta.get("split_mode") != "targeted_random":
+        raise ValueError(
+            f"Unsupported split_mode in metadata ({split_meta.get('split_mode')}). "
+            "Only targeted_random is supported."
+        )
+    if "target_class" not in split_meta:
+        raise ValueError(f"Split metadata is missing required key 'target_class': {split_meta_path}")
+
+    target_class = int(split_meta["target_class"])
+    forget_count = int(split_meta.get("forget_count", len(forget_indices)))
+    forget_fraction = split_meta.get("forget_fraction")
+
     # Load dataset/model definitions from external repos
     mu_repo = engine_repo.parent / "MachineUnlearning"
     if not (mu_repo / "src" / "__init__.py").exists():
@@ -237,6 +258,10 @@ def main() -> None:
                 "sample_id": sample_id,
                 "true_membership": is_member,
                 "split_name": split_name,
+                "split_mode": "targeted_random",
+                "target_class": target_class,
+                "forget_count": forget_count,
+                "forget_fraction": forget_fraction,
                 "model_name": args.model_name,
                 "unlearning_method": args.unlearning_method,
                 "attack_name": attack_name,
@@ -255,6 +280,10 @@ def main() -> None:
         "sample_id",
         "true_membership",
         "split_name",
+        "split_mode",
+        "target_class",
+        "forget_count",
+        "forget_fraction",
         "model_name",
         "unlearning_method",
         "attack_name",

@@ -1,5 +1,0 @@
-pyyaml
-numpy
-torch
-torchvision
-tqdm

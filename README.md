@@ -71,6 +71,25 @@ For each `(dataset, base_seed)`, split artifacts are written to:
   - `aux_indices` (optional but produced in v1)
 - `results/splits/<dataset>/seed_<seed>.meta.json`
 
+The repository now supports a single split protocol only:
+
+- `split_mode = targeted_random`
+- choose one `target_class`
+- sample forget examples only from that class
+- keep all remaining train examples in retain
+- keep official test set unchanged
+
+In metadata and logs, `forget_fraction` is the fraction within the selected target class, not the full training set.
+
+Required metadata keys include:
+
+- `split_mode` (must be `targeted_random`)
+- `dataset`
+- `seed`
+- `target_class`
+- `forget_count`
+- `forget_fraction`
+
 Both engines consume the same split file.
 
 ## Standardized Per-Sample Output Schema
@@ -80,6 +99,10 @@ Every MIA run writes CSV rows with:
 - `sample_id`
 - `true_membership`
 - `split_name`
+- `split_mode` (always `targeted_random`)
+- `target_class`
+- `forget_count`
+- `forget_fraction` (within `target_class`)
 - `model_name`
 - `unlearning_method`
 - `attack_name`
@@ -98,6 +121,15 @@ Run from repository root:
 3. `python scripts/run_unlearning.py`
 4. `python scripts/run_mia.py`
 5. `python scripts/run_ensemble_eval.py`
+
+Utility-only validation for one unlearning method at a time (before MIA runs):
+
+- `python scripts/run_utility_eval.py --dataset Cifar10 --seed 0 --method scrub`
+- `python scripts/run_utility_eval.py --dataset Cifar10 --seed 0 --method ssd`
+- `python scripts/run_utility_eval.py --dataset Cifar10 --seed 0 --method bad_teacher`
+- `python scripts/run_utility_eval.py --dataset Cifar10 --seed 0 --method amnesiac`
+
+This workflow uses the canonical `targeted_random` split, trains or reuses baseline, runs one unlearning method, and writes utility metrics plus drops.
 6. `python scripts/aggregate_results.py`
 
 Each script supports focused reruns (single dataset/seed/method/attack) via CLI flags.

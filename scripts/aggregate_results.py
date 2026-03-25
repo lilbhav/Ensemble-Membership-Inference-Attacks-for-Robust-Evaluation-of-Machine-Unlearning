@@ -51,7 +51,15 @@ def main() -> None:
     mia_rows = []
     for p in sorted(results_root.glob("mia/**/*.csv")):
         if p.name.endswith(".csv"):
-            mia_rows.extend(read_csv(p))
+            rows = read_csv(p)
+            for idx, row in enumerate(rows, start=1):
+                for key in ["split_mode", "target_class", "forget_count", "forget_fraction"]:
+                    if key not in row or row[key] in {"", None}:
+                        raise ValueError(
+                            f"Missing required split metadata '{key}' in {p} at row {idx}. "
+                            "Regenerate MIA outputs with targeted_random metadata."
+                        )
+            mia_rows.extend(rows)
 
     if mia_rows:
         with (aggregate_dir / "mia_predictions_all.csv").open("w", newline="", encoding="utf-8") as f:
@@ -59,6 +67,10 @@ def main() -> None:
                 "sample_id",
                 "true_membership",
                 "split_name",
+                "split_mode",
+                "target_class",
+                "forget_count",
+                "forget_fraction",
                 "model_name",
                 "unlearning_method",
                 "attack_name",
