@@ -11,6 +11,26 @@ import torch
 from torch.utils.data import ConcatDataset, DataLoader, Subset
 
 
+def configure_torch_pickle_compat() -> None:
+    """Make torch.load backward-compatible with pickled non-tensor objects.
+
+    PyTorch 2.6 changed torch.load default to weights_only=True, which breaks
+    mia-disparity shokri cached AttackTrainingSet loading. We force
+    weights_only=False for this trusted local workflow.
+    """
+    if getattr(torch.load, "_miae_compat_patched", False):
+        return
+
+    original_torch_load = torch.load
+
+    def _torch_load_compat(*args, **kwargs):
+        kwargs.setdefault("weights_only", False)
+        return original_torch_load(*args, **kwargs)
+
+    _torch_load_compat._miae_compat_patched = True
+    torch.load = _torch_load_compat
+
+
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Bridge to mia-disparity attacks")
     p.add_argument("--dataset", required=True, choices=["Cifar10", "Cifar100"])
@@ -153,6 +173,7 @@ def main() -> None:
         )
 
     sys.path.insert(0, str(engine_repo))
+    configure_torch_pickle_compat()
 
     # Load split indices produced by prepare_splits.py
     split_data = np.load(args.split_file)

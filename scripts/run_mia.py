@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import shutil
 import sys
 from pathlib import Path
 
@@ -20,6 +21,14 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--attack")
     p.add_argument("--target")
     p.add_argument("--attack-seed", type=int)
+    p.add_argument(
+        "--reset-mia",
+        action="store_true",
+        help=(
+            "Delete existing MIA outputs before running. "
+            "Scope is dataset+seed, and if --method is set, only that method folder is reset."
+        ),
+    )
     return p.parse_args()
 
 
@@ -59,6 +68,16 @@ def main() -> None:
 
     for dataset in datasets:
         for seed in seeds:
+            if args.reset_mia:
+                seed_mia_dir = results_root / "mia" / dataset / f"seed_{seed}"
+                if args.method:
+                    reset_dir = seed_mia_dir / args.method
+                else:
+                    reset_dir = seed_mia_dir
+                if reset_dir.exists():
+                    shutil.rmtree(reset_dir)
+                    print(f"Reset existing MIA outputs: {reset_dir}")
+
             split_file = results_root / "splits" / dataset / f"seed_{seed}.npz"
             if not split_file.exists():
                 raise FileNotFoundError(f"Missing split file: {split_file}")
