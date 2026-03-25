@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +24,11 @@ class MachineUnlearningAdapter:
         training_cfg: dict,
         device: str,
     ) -> None:
+        required_baseline_keys = ["epochs", "batch_size", "lr", "optimizer", "momentum"]
+        missing = [k for k in required_baseline_keys if k not in training_cfg or training_cfg[k] is None]
+        if missing:
+            raise ValueError(f"Missing baseline config values: {missing}")
+
         # Build bridge command line for baseline training
         cmd = [
             "python",
@@ -71,6 +77,34 @@ class MachineUnlearningAdapter:
         device: str,
         run_name: str | None = None,
     ) -> None:
+        supported_methods = {"scrub", "ssd", "bad_teacher", "amnesiac"}
+        if unlearning_method not in supported_methods:
+            raise ValueError(
+                f"Unsupported unlearning method '{unlearning_method}'. "
+                f"Supported methods: {sorted(supported_methods)}"
+            )
+
+        required_unlearning_keys = ["epochs", "batch_size", "lr", "optimizer", "momentum"]
+        missing = [k for k in required_unlearning_keys if k not in training_cfg or training_cfg[k] is None]
+        if missing:
+            raise ValueError(f"Missing unlearning config values: {missing}")
+
+        method_cfg_root: dict[str, Any] | None = training_cfg.get("methods")
+        if not isinstance(method_cfg_root, dict):
+            raise ValueError(
+                "Missing training.unlearning.methods config block. "
+                "Define per-method dictionaries for scrub, ssd, bad_teacher, and amnesiac."
+            )
+        if unlearning_method not in method_cfg_root or method_cfg_root[unlearning_method] is None:
+            raise ValueError(
+                f"Missing method-specific config: training.unlearning.methods.{unlearning_method}"
+            )
+        method_cfg = method_cfg_root[unlearning_method]
+        if not isinstance(method_cfg, dict):
+            raise ValueError(
+                f"training.unlearning.methods.{unlearning_method} must be a dictionary."
+            )
+
         # Build bridge command line for unlearning run
         cmd = [
             "python",
@@ -105,41 +139,11 @@ class MachineUnlearningAdapter:
             str(training_cfg["optimizer"]),
             "--momentum",
             str(training_cfg["momentum"]),
+            "--method-config-json",
+            json.dumps(method_cfg),
         ]
 
         if run_name:
             cmd.extend(["--run-name", run_name])
-
-        if unlearning_method in {"scrub", "scrub_original", "scrub_teacher_loaded"}:
-            scrub_cfg: dict[str, Any] = training_cfg.get("scrub", {})
-            scrub_mode = scrub_cfg.get("mode")
-            if unlearning_method == "scrub_original":
-                scrub_mode = "original"
-            elif unlearning_method == "scrub_teacher_loaded":
-                scrub_mode = "teacher_loaded"
-
-            if scrub_mode:
-                cmd.extend(["--scrub-mode", str(scrub_mode)])
-
-            scalar_mappings = {
-                "epochs": "--scrub-epochs",
-                "lr": "--scrub-lr",
-                "distill_weight": "--scrub-distill-weight",
-                "forget_loss_weight": "--scrub-forget-loss-weight",
-                "maximize_epochs": "--scrub-maximize-epochs",
-                "maximize_steps": "--scrub-maximize-steps",
-                "minimize_steps": "--scrub-minimize-steps",
-                "kd_temperature": "--scrub-kd-temperature",
-                "weight_decay": "--scrub-weight-decay",
-                "momentum": "--scrub-momentum",
-                "lr_decay_rate": "--scrub-lr-decay-rate",
-            }
-            for key, flag in scalar_mappings.items():
-                if key in scrub_cfg and scrub_cfg[key] is not None:
-                    cmd.extend([flag, str(scrub_cfg[key])])
-
-            if "lr_decay_epochs" in scrub_cfg:
-                decay_epochs = ",".join(str(x) for x in scrub_cfg["lr_decay_epochs"])
-                cmd.extend(["--scrub-lr-decay-epochs", decay_epochs])
 
         run_subprocess(cmd, cwd=self.project_root)

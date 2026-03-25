@@ -23,7 +23,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--method",
         required=True,
-        choices=["scrub", "scrub_original", "scrub_teacher_loaded", "ssd", "bad_teacher", "amnesiac"],
+        choices=["scrub", "ssd", "bad_teacher", "amnesiac"],
     )
     p.add_argument(
         "--retrain-baseline",
@@ -79,19 +79,11 @@ def read_metrics(metrics_path: Path) -> dict:
 
 
 def summarize_utility(
-    dataset: str,
-    seed: int,
     method: str,
     split_meta: dict,
     baseline_metrics: dict,
     unlearn_metrics: dict,
 ) -> dict:
-    if "train_acc" not in baseline_metrics:
-        raise ValueError(
-            "Baseline metrics missing 'train_acc'. Re-run baseline with updated bridge to generate train accuracy."
-        )
-
-    baseline_train = float(baseline_metrics["train_acc"])
     baseline_retain = float(baseline_metrics["retain_acc"])
     baseline_forget = float(baseline_metrics["forget_acc"])
     baseline_test = float(baseline_metrics["test_acc"])
@@ -101,23 +93,18 @@ def summarize_utility(
     unlearn_test = float(unlearn_metrics["test_acc"])
 
     return {
-        "dataset": dataset,
-        "base_seed": int(seed),
-        "unlearning_method": method,
-        "split_mode": "targeted_random",
+        "method": method,
         "target_class": int(split_meta["target_class"]),
         "forget_count": int(split_meta["forget_count"]),
-        "forget_fraction": float(split_meta["forget_fraction"]),
-        "baseline_train_acc": baseline_train,
         "baseline_retain_acc": baseline_retain,
         "baseline_forget_acc": baseline_forget,
         "baseline_test_acc": baseline_test,
-        "unlearn_retain_acc": unlearn_retain,
-        "unlearn_forget_acc": unlearn_forget,
-        "unlearn_test_acc": unlearn_test,
-        "utility_drop": baseline_test - unlearn_test,
+        "unlearned_retain_acc": unlearn_retain,
+        "unlearned_forget_acc": unlearn_forget,
+        "unlearned_test_acc": unlearn_test,
         "retain_drop": baseline_retain - unlearn_retain,
         "forget_drop": baseline_forget - unlearn_forget,
+        "test_drop": baseline_test - unlearn_test,
     }
 
 
@@ -199,8 +186,6 @@ def main() -> None:
     unlearn_metrics = read_metrics(unlearn_model.with_suffix(".metrics.json"))
 
     summary = summarize_utility(
-        dataset=dataset,
-        seed=seed,
         method=method,
         split_meta=split_meta,
         baseline_metrics=baseline_metrics,
@@ -216,7 +201,7 @@ def main() -> None:
     print(
         "Saved utility summary: "
         f"{summary_path} (target_class={summary['target_class']}, "
-        f"forget_fraction_within_target_class={summary['forget_fraction']:.6f})"
+        f"forget_count={summary['forget_count']})"
     )
 
 

@@ -37,6 +37,12 @@ def main() -> None:
     datasets = [args.dataset] if args.dataset else cfg["experiment"]["datasets"]
     seeds = [args.seed] if args.seed is not None else cfg["experiment"]["base_seeds"]
     methods = [args.method] if args.method else cfg["unlearning"]["methods"]
+    supported_methods = {"scrub", "ssd", "bad_teacher", "amnesiac"}
+    invalid_methods = [m for m in methods if m not in supported_methods]
+    if invalid_methods:
+        raise ValueError(
+            f"Unsupported methods requested: {invalid_methods}. Supported methods: {sorted(supported_methods)}"
+        )
 
     for dataset in datasets:
         for seed in seeds:

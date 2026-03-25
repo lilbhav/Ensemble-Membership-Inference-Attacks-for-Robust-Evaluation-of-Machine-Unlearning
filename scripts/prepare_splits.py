@@ -96,6 +96,13 @@ def _expected_split_metadata(
     }
 
 
+def _label_histogram(labels: np.ndarray) -> dict[str, int]:
+    if labels.size == 0:
+        return {}
+    values, counts = np.unique(labels, return_counts=True)
+    return {str(int(v)): int(c) for v, c in zip(values, counts)}
+
+
 def _validate_existing_meta(meta_file: Path, expected: dict[str, object]) -> tuple[bool, str]:
     if not meta_file.exists():
         return False, f"Missing metadata file: {meta_file}"
@@ -108,6 +115,9 @@ def _validate_existing_meta(meta_file: Path, expected: dict[str, object]) -> tup
         "dataset",
         "seed",
         "target_class",
+        "train_size",
+        "retain_size",
+        "test_size",
         "forget_spec",
         "requested_forget_fraction",
         "requested_forget_count",
@@ -243,10 +253,14 @@ def main() -> None:
             )
 
             forget_labels = labels[parts["forget"]] if len(parts["forget"]) > 0 else np.array([], dtype=np.int64)
+            retain_labels = labels[parts["retain"]] if len(parts["retain"]) > 0 else np.array([], dtype=np.int64)
             if not np.all(forget_labels == target_class):
                 raise AssertionError("Found forget samples outside the selected target_class.")
             if np.intersect1d(parts["retain"], parts["forget"]).size > 0:
                 raise AssertionError("retain_indices and forget_indices must be disjoint.")
+            union_sorted = np.sort(np.concatenate([parts["retain"], parts["forget"]]))
+            if not np.array_equal(union_sorted, train_indices):
+                raise AssertionError("retain_indices union forget_indices must equal the full training set.")
 
             if forget_count is not None and len(parts["forget"]) != forget_count:
                 raise AssertionError(
@@ -261,6 +275,8 @@ def main() -> None:
                     )
 
             test_indices = np.arange(test_size, dtype=np.int64)
+            if not np.array_equal(test_indices, np.arange(test_size, dtype=np.int64)):
+                raise AssertionError("test_indices must remain unchanged from the canonical full test set.")
             np.savez(
                 split_file,
                 retain_indices=np.sort(parts["retain"]),
@@ -281,6 +297,7 @@ def main() -> None:
                 "forget_count": int(derived["forget_count"]),
                 "forget_fraction": float(derived["forget_fraction"]),
                 "train_size": train_size,
+                "retain_size": int(len(parts["retain"])),
                 "test_size": test_size,
                 "counts": {
                     "retain": int(len(parts["retain"])),
@@ -294,6 +311,33 @@ def main() -> None:
             }
             with meta_file.open("w", encoding="utf-8") as f:
                 json.dump(meta, f, indent=2)
+
+            debug_summary_file = split_root / dataset_name / f"seed_{seed}.debug.json"
+            debug_summary = {
+                "dataset": dataset_name,
+                "seed": int(seed),
+                "split_mode": "targeted_random",
+                "target_class": int(target_class),
+                "forget_count": int(len(parts["forget"])),
+                "forget_fraction": float(derived["forget_fraction"]),
+                "train_size": int(train_size),
+                "retain_size": int(len(parts["retain"])),
+                "test_size": int(test_size),
+                "first_20_forget_indices": [int(x) for x in parts["forget"][:20]],
+                "first_20_retain_indices": [int(x) for x in parts["retain"][:20]],
+                "forget_label_histogram": _label_histogram(forget_labels),
+                "retain_label_histogram": _label_histogram(retain_labels),
+            }
+            with debug_summary_file.open("w", encoding="utf-8") as f:
+                json.dump(debug_summary, f, indent=2)
+
+            print(
+                f"Split debug summary ({dataset_name}/seed_{seed})\n"
+                f"  first_20_forget_indices={debug_summary['first_20_forget_indices']}\n"
+                f"  first_20_retain_indices={debug_summary['first_20_retain_indices']}\n"
+                f"  forget_label_histogram={debug_summary['forget_label_histogram']}\n"
+                f"  retain_label_histogram={debug_summary['retain_label_histogram']}"
+            )
 
             print(
                 "Saved targeted_random split: "
