@@ -122,50 +122,26 @@ drive.mount('/content/drive')
 !pip install -q -r requirements-colab.txt
 ```
 
-## 2) Create/update Colab config
+## 2) Run your exact basic pipeline
 
-```bash
-!python scripts/create_colab_config.py \
-  --template configs/experiment.yaml \
-  --out configs/experiment_colab.yaml \
-  --repo-root /content/Ensemble-Membership-Inference-Attacks-for-Robust-Evaluation-of-Machine-Unlearning \
-  --drive-root /content/drive/MyDrive/unlearning_runs \
-  --dataset Cifar10
-```
+`configs/experiment.yaml` is already set to save outputs in Google Drive:
 
-This writes:
+- Data: `/content/drive/MyDrive/unlearning_runs/data`
+- Models/checkpoints/results: `/content/drive/MyDrive/unlearning_runs/results`
 
-- Data to `/content/drive/MyDrive/unlearning_runs/data`
-- Models/checkpoints/results to `/content/drive/MyDrive/unlearning_runs/results`
-
-## 3) Run your exact basic pipeline
-
-Option A: single command wrapper
-
-```bash
-!python scripts/run_basic_colab.py \
-  --config configs/experiment_colab.yaml \
-  --dataset Cifar10 \
-  --seed 0 \
-  --method scrub \
-  --attack yeom \
-  --target forget_vs_test \
-  --attack-seed 0
-```
-
-Option B: run each step manually
+Run these commands:
 
 ```bash
 %cd /content/Ensemble-Membership-Inference-Attacks-for-Robust-Evaluation-of-Machine-Unlearning/scripts
-!python prepare_splits.py --config ../configs/experiment_colab.yaml --dataset Cifar10 --seed 0
-!python run_baseline.py --config ../configs/experiment_colab.yaml --dataset Cifar10 --seed 0
-!python run_unlearning.py --config ../configs/experiment_colab.yaml --dataset Cifar10 --seed 0 --method scrub
-!python run_mia.py --config ../configs/experiment_colab.yaml --dataset Cifar10 --seed 0 --method scrub --attack yeom --target forget_vs_test --attack-seed 0
-!python run_ensemble_eval.py --config ../configs/experiment_colab.yaml --dataset Cifar10 --seed 0
-!python aggregate_results.py --config ../configs/experiment_colab.yaml
+!python prepare_splits.py --dataset Cifar10 --seed 0
+!python run_baseline.py --dataset Cifar10 --seed 0
+!python run_unlearning.py --dataset Cifar10 --seed 0 --method scrub
+!python run_mia.py --dataset Cifar10 --seed 0 --method scrub --attack yeom --target forget_vs_test --attack-seed 0
+!python run_ensemble_eval.py --dataset Cifar10 --seed 0
+!python aggregate_results.py
 ```
 
-## 4) Output locations
+## 3) Output locations
 
 - Baseline checkpoint:
   - `/content/drive/MyDrive/unlearning_runs/results/models/Cifar10/seed_0/baseline.pt`
