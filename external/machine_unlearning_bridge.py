@@ -185,9 +185,9 @@ def main() -> None:
     test_loader_eval = DataLoader(test_ds, batch_size=args.batch_size, shuffle=False)
 
     metrics = {
-        "retain_acc": mu_metrics.evaluate(retain_loader_eval, model, device)["Acc"],
-        "forget_acc": mu_metrics.evaluate(forget_loader_eval, model, device)["Acc"],
-        "test_acc": mu_metrics.evaluate(test_loader_eval, model, device)["Acc"],
+        "retain_acc": mu_metrics.evaluate(model, retain_loader_eval, device)["Acc"],
+        "forget_acc": mu_metrics.evaluate(model, forget_loader_eval, device)["Acc"],
+        "test_acc": mu_metrics.evaluate(model, test_loader_eval, device)["Acc"],
         "dataset": args.dataset,
         "seed": args.seed,
         "mode": args.mode,
