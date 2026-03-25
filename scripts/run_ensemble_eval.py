@@ -108,6 +108,41 @@ def main() -> None:
                         writer.writeheader()
                         writer.writerows(disparity_rows)
 
+                    # 2b) Per-attack coverage: how many samples each attack flags as members
+                    union_positives = set().union(*[attack_to_positive[a] for a in attacks]) if attacks else set()
+                    coverage_rows = []
+                    for a in attacks:
+                        positives = attack_to_positive[a]
+                        coverage_rows.append({
+                            "dataset": dataset,
+                            "base_seed": seed,
+                            "unlearning_method": method,
+                            "target": target,
+                            "attack": a,
+                            "total_samples": len(all_sample_ids),
+                            "positive_count": len(positives),
+                            "coverage_fraction": round(len(positives) / max(1, len(all_sample_ids)), 6),
+                        })
+                    # Synthetic union row: coverage of OR ensemble
+                    coverage_rows.append({
+                        "dataset": dataset,
+                        "base_seed": seed,
+                        "unlearning_method": method,
+                        "target": target,
+                        "attack": "union_or",
+                        "total_samples": len(all_sample_ids),
+                        "positive_count": len(union_positives),
+                        "coverage_fraction": round(len(union_positives) / max(1, len(all_sample_ids)), 6),
+                    })
+
+                    with (out_dir / "coverage_per_attack.csv").open("w", newline="", encoding="utf-8") as f:
+                        writer = csv.DictWriter(
+                            f,
+                            fieldnames=["dataset", "base_seed", "unlearning_method", "target", "attack", "total_samples", "positive_count", "coverage_fraction"],
+                        )
+                        writer.writeheader()
+                        writer.writerows(coverage_rows)
+
                     ensemble_rows = []
 
                     # 3) OR voting: positive if any attack votes positive

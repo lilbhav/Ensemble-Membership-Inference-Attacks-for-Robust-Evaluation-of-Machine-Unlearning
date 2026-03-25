@@ -1,17 +1,22 @@
 {
+  "split_mode": "targeted_random",
   "dataset": "Cifar10",
   "seed": 0,
+  "target_class": 0,
+  "forget_spec": "fraction",
+  "requested_forget_fraction": 0.1,
+  "requested_forget_count": null,
+  "forget_count": 500,
+  "forget_fraction": 0.1,
   "train_size": 50000,
   "test_size": 10000,
   "counts": {
-    "retain": 35000,
-    "forget": 5000,
+    "retain": 49500,
+    "forget": 500,
     "test": 10000,
-    "aux": 10000
+    "aux": 0
   },
   "fractions": {
-    "forget_fraction": 0.1,
-    "aux_fraction": 0.2,
-    "test_fraction": 1.0
+    "forget_fraction_within_target_class": 0.1
   }
 }

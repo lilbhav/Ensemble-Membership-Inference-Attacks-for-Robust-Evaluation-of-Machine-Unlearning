@@ -26,6 +26,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Force baseline retraining even if baseline checkpoint already exists.",
     )
+    p.add_argument(
+        "--rerun-unlearning",
+        action="store_true",
+        help="Force unlearning even if unlearned checkpoint and metrics already exist.",
+    )
     return p.parse_args()
 
 
@@ -169,18 +174,22 @@ def main() -> None:
         )
 
     unlearn_model = model_dir / f"unlearn_{method}.pt"
-    adapter.run_unlearning(
-        dataset=dataset,
-        seed=seed,
-        unlearning_method=method,
-        split_file=split_file,
-        baseline_model_path=baseline_model,
-        model_out=unlearn_model,
-        data_root=data_root,
-        engine_repo=engine_repo,
-        training_cfg=cfg["training"]["unlearning"],
-        device=cfg["experiment"].get("device", "cuda"),
-    )
+    unlearn_metrics_path = unlearn_model.with_suffix(".metrics.json")
+    if args.rerun_unlearning or not unlearn_model.exists() or not unlearn_metrics_path.exists():
+        adapter.run_unlearning(
+            dataset=dataset,
+            seed=seed,
+            unlearning_method=method,
+            split_file=split_file,
+            baseline_model_path=baseline_model,
+            model_out=unlearn_model,
+            data_root=data_root,
+            engine_repo=engine_repo,
+            training_cfg=cfg["training"]["unlearning"],
+            device=cfg["experiment"].get("device", "cuda"),
+        )
+    else:
+        print(f"Reusing existing unlearned model: {unlearn_model}")
 
     baseline_metrics = read_metrics(baseline_metrics_path)
     unlearn_metrics = read_metrics(unlearn_model.with_suffix(".metrics.json"))
