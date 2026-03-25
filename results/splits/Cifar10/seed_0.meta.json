@@ -1,0 +1,17 @@
+{
+  "dataset": "Cifar10",
+  "seed": 0,
+  "train_size": 50000,
+  "test_size": 10000,
+  "counts": {
+    "retain": 35000,
+    "forget": 5000,
+    "test": 10000,
+    "aux": 10000
+  },
+  "fractions": {
+    "forget_fraction": 0.1,
+    "aux_fraction": 0.2,
+    "test_fraction": 1.0
+  }
+}

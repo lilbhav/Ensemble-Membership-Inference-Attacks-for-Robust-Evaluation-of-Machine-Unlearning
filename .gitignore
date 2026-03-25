@@ -1,0 +1,85 @@
+# ── Python ──────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.pyd
+
+# ── Distribution / packaging ─────────────────────────────────────────────────
+build/
+dist/
+develop-eggs/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# ── Virtual environments ──────────────────────────────────────────────────────
+.venv/
+venv/
+env/
+ENV/
+.env
+
+# ── Jupyter ───────────────────────────────────────────────────────────────────
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# ── Testing / coverage ────────────────────────────────────────────────────────
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+*.cover
+coverage.xml
+nosetests.xml
+
+# ── Type checking / linting ───────────────────────────────────────────────────
+.mypy_cache/
+.dmypy.json
+.ruff_cache/
+
+# ── IDE / editor ──────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ── OS ────────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Dataset / raw data ────────────────────────────────────────────────────────
+# CIFAR-10 binary batches downloaded locally; not tracked in git
+data/cifar-10-batches-py/
+data/**/*.pkl
+data/**/*.bin
+data/**/*.tar.gz
+
+# ── Experiment outputs ────────────────────────────────────────────────────────
+# Trained model checkpoints (can be large)
+results/models/
+# Keep results/splits/ (small JSON/NPZ reproducibility metadata) tracked
+
+# ── Logs ─────────────────────────────────────────────────────────────────────
+*.log
+logs/
+wandb/
+mlruns/
+
+# ── Misc ──────────────────────────────────────────────────────────────────────
+*.tmp
+*.bak

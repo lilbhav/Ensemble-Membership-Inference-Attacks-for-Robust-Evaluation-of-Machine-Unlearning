@@ -1,0 +1,47 @@
+paths:
+  machine_unlearning_repo: Third_Party_Code/MachineUnlearning
+  mia_disparity_repo: Third_Party_Code/mia-disparity
+  data_root: data
+  results_root: results
+
+experiment:
+  datasets: [Cifar10, Cifar100]
+  base_model: ResNet18
+  base_seeds: [0]
+  device: cuda
+
+split:
+  forget_fraction: 0.1
+  aux_fraction: 0.2
+  test_fraction: 1.0
+  stratified_by_label: true
+
+training:
+  baseline:
+    epochs: 30
+    batch_size: 128
+    lr: 0.0001
+    optimizer: adam
+    momentum: 0.5
+  unlearning:
+    epochs: 1
+    batch_size: 128
+    lr: 0.0001
+    optimizer: adam
+    momentum: 0.5
+
+unlearning:
+  methods: [scrub, ssd, bad_teacher, amnesiac]
+
+mia:
+  attacks: [yeom, shokri, lira, reference, losstraj, calibration, aug]
+  attack_seeds: [0]
+  attack_epochs: 100
+  batch_size: 256
+  targets: [forget_vs_test, retain_vs_test, forget_vs_retain]
+
+ensemble:
+  voting_rules:
+    or: true
+    k_of_m: [2, 3]
+  positive_label_threshold: 0.5

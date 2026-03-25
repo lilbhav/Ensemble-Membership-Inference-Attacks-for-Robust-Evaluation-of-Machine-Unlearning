@@ -41,3 +41,63 @@ We aim to:
 ### Ensembles
 - **OR (Union)** → maximize coverage  
 - **k-of-M Voting** → tradeoff between precision and recall  
+
+---
+
+# V1 External-Engine Architecture
+
+This repository now uses a thin adapter architecture:
+
+- The framework owns split generation, orchestration, result collection, disparity, and ensemble evaluation.
+- The third-party repositories under `Third_Party_Code/` are treated as external engines.
+- No MIA or unlearning algorithm internals are copied into framework modules.
+
+## Folder Layout
+
+- `configs/experiment.yaml` - single source of truth for datasets, seeds, methods, attacks, and paths.
+- `adapters/` - subprocess adapters that call bridge scripts and fail loudly on errors.
+- `external/` - bridge scripts that import third-party engine modules and execute runs with canonical splits.
+- `scripts/` - user-facing pipeline entrypoints.
+- `results/` - all generated artifacts.
+
+## Canonical Split Artifacts
+
+For each `(dataset, base_seed)`, split artifacts are written to:
+
+- `results/splits/<dataset>/seed_<seed>.npz` with:
+  - `retain_indices`
+  - `forget_indices`
+  - `test_indices`
+  - `aux_indices` (optional but produced in v1)
+- `results/splits/<dataset>/seed_<seed>.meta.json`
+
+Both engines consume the same split file.
+
+## Standardized Per-Sample Output Schema
+
+Every MIA run writes CSV rows with:
+
+- `sample_id`
+- `true_membership`
+- `split_name`
+- `model_name`
+- `unlearning_method`
+- `attack_name`
+- `attack_seed`
+- `score`
+- `prediction`
+- `dataset`
+- `base_seed`
+
+## Pipeline Scripts
+
+Run from repository root:
+
+1. `python scripts/prepare_splits.py`
+2. `python scripts/run_baseline.py`
+3. `python scripts/run_unlearning.py`
+4. `python scripts/run_mia.py`
+5. `python scripts/run_ensemble_eval.py`
+6. `python scripts/aggregate_results.py`
+
+Each script supports focused reruns (single dataset/seed/method/attack) via CLI flags.
