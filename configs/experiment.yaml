@@ -31,6 +31,24 @@ training:
     lr: 0.0001
     optimizer: adam
     momentum: 0.5
+    scrub_sweep:
+      - name: scrub_default
+      - name: scrub_stronger_forgetting
+        epochs: 10
+        lr: 0.0005
+        distill_weight: 0.05
+        forget_loss_weight: 0.7
+        maximize_epochs: 4
+        maximize_steps: 2
+        minimize_steps: 1
+      - name: scrub_balanced
+        epochs: 8
+        lr: 0.0004
+        distill_weight: 0.08
+        forget_loss_weight: 0.5
+        maximize_epochs: 3
+        maximize_steps: 2
+        minimize_steps: 2
     methods:
       scrub:
         mode: teacher_loaded

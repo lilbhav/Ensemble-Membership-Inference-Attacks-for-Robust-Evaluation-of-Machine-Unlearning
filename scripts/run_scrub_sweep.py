@@ -70,23 +70,26 @@ def main() -> None:
         )
 
     baseline_metrics = load_json(baseline_metrics_path)
-    scrub_base_cfg = cfg["training"]["unlearning"].get("scrub", {})
-    sweep_entries = cfg["training"]["unlearning"].get("scrub_sweep", [])
+    unlearning_cfg = cfg["training"]["unlearning"]
+    method_cfgs = unlearning_cfg.get("methods", {})
+    scrub_base_cfg = method_cfgs.get("scrub", {})
+    sweep_entries = unlearning_cfg.get("scrub_sweep", [])
     if not sweep_entries:
         raise ValueError("No SCRUB sweep entries configured under training.unlearning.scrub_sweep")
 
     rows = []
     for entry in sweep_entries:
         run_name = entry["name"]
-        method = entry.get("method", "scrub_teacher_loaded")
+        method = entry.get("method", "scrub")
         scrub_cfg = merge_scrub_config(scrub_base_cfg, entry)
 
         model_out = model_dir / f"unlearn_{run_name}.pt"
         metrics_path = model_out.with_suffix(".metrics.json")
 
         if args.rerun or not model_out.exists() or not metrics_path.exists():
-            training_cfg = dict(cfg["training"]["unlearning"])
-            training_cfg["scrub"] = scrub_cfg
+            training_cfg = dict(unlearning_cfg)
+            training_cfg["methods"] = dict(method_cfgs)
+            training_cfg["methods"]["scrub"] = scrub_cfg
             adapter.run_unlearning(
                 dataset=args.dataset,
                 seed=args.seed,
