@@ -410,7 +410,16 @@ def _collect_unlearning_records(unlearning_dir: Path) -> List[Dict[str, object]]
         selected = dict(text_payload.get("selected", {}))
         history = list(text_payload.get("history", []))
 
+        # Discover summary JSON: prefer exact name, fall back to any matching glob
+        # (handles seed-specific names like scrub_results_seed42_summary.json).
         summary_path = unlearning_dir / f"{method}_results_summary.json"
+        if not summary_path.exists():
+            candidates = [
+                p for p in sorted(unlearning_dir.glob(f"{method}_results*summary.json"))
+                if p.name not in {"attacks_summary.json", "config.json"}
+            ]
+            summary_path = candidates[0] if candidates else summary_path
+
         if summary_path.exists():
             parsed_summary = parse_unlearning_summary(summary_path)
             if parsed_summary is not None:
@@ -446,7 +455,12 @@ def _collect_unlearning_records(unlearning_dir: Path) -> List[Dict[str, object]]
                         if value is not None:
                             selected[key] = value
 
+        # Discover history CSV: prefer exact name, fall back to glob.
         history_csv = unlearning_dir / f"{method}_results_summary_history.csv"
+        if not history_csv.exists():
+            csv_candidates = sorted(unlearning_dir.glob(f"{method}_results*summary_history.csv"))
+            history_csv = csv_candidates[0] if csv_candidates else history_csv
+
         if history_csv.exists():
             csv_history = _read_history_csv(history_csv)
             if csv_history:

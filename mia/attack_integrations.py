@@ -1037,6 +1037,15 @@ class ReferenceAttackWrapper:
             # Get membership scores with safe globals context
             self.logger.info("Inferring membership...")
             member_scores = self._call_with_safe_globals(attack.infer, train_dataset)
+
+            # aug_mia.infer() caches augmented data to a fixed path (target_data_aug.npy).
+            # The member call writes this cache for len(train_dataset) samples; the
+            # non-member call must not reuse it or it will return the wrong number of
+            # scores, causing a shape mismatch with ground_truth_labels.
+            _aug_cache = os.path.join(temp_dir, "datasets", "target_data_aug.npy")
+            if os.path.exists(_aug_cache):
+                os.remove(_aug_cache)
+
             nonmember_scores = self._call_with_safe_globals(attack.infer, test_dataset)
 
             # Clip to [0, 1]
