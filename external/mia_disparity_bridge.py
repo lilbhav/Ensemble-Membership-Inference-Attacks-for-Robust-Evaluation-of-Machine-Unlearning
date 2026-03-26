@@ -114,7 +114,11 @@ def get_aux_info(attack, device, num_classes, args):
         "log_path": str(Path(args.output_csv).parent),
         "num_shadow_models": args.num_shadow_models,
         "shadow_diff_init": False,
-        "shadow_path": str(Path(args.output_csv).parent / "lira_shadows"),
+        # Each evaluation target (forget_vs_test, retain_vs_test, forget_vs_retain) constructs a
+        # different shadow_target_concat_set with a different length, so keep.npy sizes differ.
+        # Using a target-scoped shadow_path avoids cross-target cache collisions that cause
+        # IndexError when keep.npy size mismatches the current concat dataset size.
+        "shadow_path": str(Path(args.output_csv).parent / f"lira_shadows_{Path(args.output_csv).stem}"),
         "augmentation_query": 18,
     }
 
