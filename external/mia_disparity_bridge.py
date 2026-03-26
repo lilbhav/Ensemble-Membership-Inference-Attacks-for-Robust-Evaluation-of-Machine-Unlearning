@@ -48,6 +48,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--device", default="cuda")
     p.add_argument("--unlearning-method", required=True)
     p.add_argument("--model-name", required=True)
+    p.add_argument("--num-shadow-models", type=int, default=10)
     return p.parse_args()
 
 
@@ -111,7 +112,7 @@ def get_aux_info(attack, device, num_classes, args):
         "epochs": args.attack_epochs,
         "attack_epochs": args.attack_epochs,
         "log_path": str(Path(args.output_csv).parent),
-        "num_shadow_models": 10,
+        "num_shadow_models": args.num_shadow_models,
         "shadow_diff_init": False,
         "shadow_path": str(Path(args.output_csv).parent / "lira_shadows"),
         "augmentation_query": 18,

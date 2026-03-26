@@ -122,6 +122,7 @@ def main() -> None:
                                 device=cfg["experiment"].get("device", "cuda"),
                                 unlearning_method=unlearning_method,
                                 model_name=model_name,
+                                num_shadow_models=int(cfg["mia"].get("num_shadow_models", 10)),
                             )
                             print(f"Saved MIA predictions: {out_csv}")
 

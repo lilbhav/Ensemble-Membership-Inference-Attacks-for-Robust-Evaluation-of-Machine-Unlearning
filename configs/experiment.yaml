@@ -93,7 +93,8 @@ unlearning:
 mia:
   attacks: [yeom, shokri, lira, reference, losstraj, calibration, aug]
   attack_seeds: [0]
-  attack_epochs: 100
+  attack_epochs: 20
+  num_shadow_models: 5
   batch_size: 256
   targets: [forget_vs_test, retain_vs_test, forget_vs_retain]
 
