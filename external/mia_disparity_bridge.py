@@ -4,6 +4,7 @@ import argparse
 import csv
 import json
 import sys
+from itertools import accumulate
 from pathlib import Path
 
 import numpy as np
@@ -15,8 +16,9 @@ def configure_torch_pickle_compat() -> None:
     """Make torch.load backward-compatible with pickled non-tensor objects.
 
     PyTorch 2.6 changed torch.load default to weights_only=True, which breaks
-    mia-disparity shokri cached AttackTrainingSet loading. We force
-    weights_only=False for this trusted local workflow.
+    mia-disparity cached artifact loading. Older mia-disparity code also
+    expects torch._utils._accumulate, which was removed in newer PyTorch.
+    We restore both behaviors for this trusted local workflow.
     """
     if getattr(torch.load, "_miae_compat_patched", False):
         return
@@ -26,6 +28,9 @@ def configure_torch_pickle_compat() -> None:
     def _torch_load_compat(*args, **kwargs):
         kwargs.setdefault("weights_only", False)
         return original_torch_load(*args, **kwargs)
+
+    if not hasattr(torch._utils, "_accumulate"):
+        torch._utils._accumulate = accumulate
 
     _torch_load_compat._miae_compat_patched = True
     torch.load = _torch_load_compat

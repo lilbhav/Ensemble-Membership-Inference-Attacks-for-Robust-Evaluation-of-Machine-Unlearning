@@ -105,6 +105,10 @@ def main() -> None:
                             )
                             out_csv = out_dir / f"{target_name}_attack_seed_{attack_seed}.csv"
 
+                            if out_csv.exists() and not args.reset_mia:
+                                print(f"Skipping existing MIA predictions: {out_csv}")
+                                continue
+
                             # One subprocess call per attack/target/model/seed combination
                             adapter.run_attack(
                                 dataset=dataset,
