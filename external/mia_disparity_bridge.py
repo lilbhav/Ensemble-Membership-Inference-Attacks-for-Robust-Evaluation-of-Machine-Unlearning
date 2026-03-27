@@ -9,6 +9,7 @@ from pathlib import Path
 
 import numpy as np
 import torch
+import torch.nn as nn
 from torch.utils.data import ConcatDataset, DataLoader, Subset
 
 
@@ -168,6 +169,30 @@ def get_attack(attack, aux_info, target_model_access):
     raise ValueError(f"Unsupported attack: {attack}")
 
 
+def ensure_initialize_weights(model: nn.Module) -> None:
+    """Attach initialize_weights() when the model class does not define it.
+
+    Some mia-disparity attacks (e.g., losstraj) expect this method to exist.
+    """
+    model_cls = model.__class__
+    if hasattr(model_cls, "initialize_weights"):
+        return
+
+    def _initialize_weights(self: nn.Module) -> None:
+        for module in self.modules():
+            if isinstance(module, (nn.Conv2d, nn.Linear)):
+                nn.init.kaiming_normal_(module.weight, mode="fan_out", nonlinearity="relu")
+                if module.bias is not None:
+                    nn.init.zeros_(module.bias)
+            elif isinstance(module, (nn.BatchNorm2d, nn.GroupNorm)):
+                if module.weight is not None:
+                    nn.init.ones_(module.weight)
+                if module.bias is not None:
+                    nn.init.zeros_(module.bias)
+
+    model_cls.initialize_weights = _initialize_weights
+
+
 def main() -> None:
     args = parse_args()
 
@@ -255,6 +280,8 @@ def main() -> None:
     model.eval()
 
     untrained_model = getattr(mu_models, "ResNet18")(num_classes=num_classes, input_channels=num_channels).to(device)
+    ensure_initialize_weights(model)
+    ensure_initialize_weights(untrained_model)
 
     # Prepare attack-specific artifacts (e.g., shadow models) and run inference
     target_model_access = get_target_model_access(attack_name, model, untrained_model)
