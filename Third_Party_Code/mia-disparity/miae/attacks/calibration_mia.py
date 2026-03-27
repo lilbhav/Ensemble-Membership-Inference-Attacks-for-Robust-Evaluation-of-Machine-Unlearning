@@ -94,14 +94,23 @@ class CalibrationUtil(MIAUtils):
 
         model.eval()
         model.to(device)
-        loss = []
-        for data, label in tqdm(dataset, desc="Calculating loss"):
-            data = data.unsqueeze(0)
-            label = torch.tensor([label]).to(device)
-            output = model(data.to(device))
-            loss.append(F.cross_entropy(output, label).item())
 
-        return np.array(loss)
+        # Process losses in batches; the original per-sample loop is extremely slow
+        # on large concat datasets used by calibration inference.
+        loader = DataLoader(dataset, batch_size=256, shuffle=False, num_workers=2)
+        losses: list[np.ndarray] = []
+
+        with torch.no_grad():
+            for data, label in tqdm(loader, desc="Calculating loss"):
+                data = data.to(device)
+                label = label.to(device)
+                output = model(data)
+                batch_loss = F.cross_entropy(output, label, reduction="none")
+                losses.append(batch_loss.detach().cpu().numpy())
+
+        if not losses:
+            return np.array([], dtype=np.float32)
+        return np.concatenate(losses, axis=0)
 
 
 class CalibrationAttack(MiAttack):
