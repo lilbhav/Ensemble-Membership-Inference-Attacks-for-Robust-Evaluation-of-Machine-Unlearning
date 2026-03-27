@@ -165,11 +165,15 @@ class CalibrationAttack(MiAttack):
                 trainloader = DataLoader(train_set, batch_size=self.aux_info.batch_size, shuffle=True, num_workers=2)
                 testloader = DataLoader(test_set, batch_size=self.aux_info.batch_size, shuffle=False, num_workers=2)
 
-                try:
-                    set_seed(self.aux_info.seed)
+                set_seed(self.aux_info.seed)
+                if hasattr(self.shadow_model, "initialize_weights"):
                     self.shadow_model.initialize_weights()
-                except:
-                    raise NotImplementedError("the model doesn't have .initialize_weights method")
+                else:
+                    CalibrationUtil.log(
+                        self.aux_info,
+                        "Model has no initialize_weights(); using framework default init.",
+                        print_flag=True,
+                    )
                 
                 self.shadow_model = CalibrationUtil.train_shadow_model(self.shadow_model, trainloader, testloader, self.aux_info)
                 torch.save(self.shadow_model, self.aux_info.shadow_model_path + '/shadow_model.pth')
@@ -188,11 +192,15 @@ class CalibrationAttack(MiAttack):
                 shadow_model_i.to(self.aux_info.device)
 
                 if self.aux_info.shadow_diff_init:
-                    try:
-                        set_seed((self.aux_info.seed + i)*100) # *100 to avoid overlapping of different instances
+                    set_seed((self.aux_info.seed + i)*100) # *100 to avoid overlapping of different instances
+                    if hasattr(shadow_model_i, "initialize_weights"):
                         shadow_model_i.initialize_weights()
-                    except:
-                        raise NotImplementedError("the model doesn't have .initialize_weights method")
+                    else:
+                        CalibrationUtil.log(
+                            self.aux_info,
+                            "Model has no initialize_weights(); using framework default init.",
+                            print_flag=True,
+                        )
 
                 train_len = int(len(sub_shadow_dataset_list[i]) * self.aux_info.shadow_train_ratio)
                 test_len = len(sub_shadow_dataset_list[i]) - train_len

@@ -283,11 +283,15 @@ class AugAttack(MiAttack):
         else:
             AugUtil.log(self.aux_info, "Training shadow model", print_flag=True)
 
-            try:
-                set_seed(self.aux_info.seed)
+            set_seed(self.aux_info.seed)
+            if hasattr(shadow_model, "initialize_weights"):
                 shadow_model.initialize_weights()
-            except:
-                raise NotImplementedError("the model doesn't have .initialize_weights method")
+            else:
+                AugUtil.log(
+                    self.aux_info,
+                    "Model has no initialize_weights(); using framework default init.",
+                    print_flag=True,
+                )
 
             shadow_model = AugUtil.train_shadow_model(shadow_model, trainloader, testloader, self.aux_info)
             torch.save(shadow_model, self.aux_info.shadow_model_path + '/shadow_model.pth')

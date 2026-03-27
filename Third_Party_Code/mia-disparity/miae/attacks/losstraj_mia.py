@@ -267,11 +267,15 @@ class LosstrajUtil(MIAUtils):
         :return: model access to the shadow model.
         """
 
-        try:
-            set_seed(seed)
+        set_seed(seed)
+        if hasattr(shadow_model, "initialize_weights"):
             shadow_model.initialize_weights()
-        except:
-            raise NotImplementedError("the model doesn't have .initialize_weights method")
+        else:
+            print("LOSSTRAJ: model has no initialize_weights(); using framework default init.")
+            if auxiliary_info.log_path is not None:
+                auxiliary_info.logger.info(
+                    "LOSSTRAJ: model has no initialize_weights(); using framework default init."
+                )
 
 
         print(
