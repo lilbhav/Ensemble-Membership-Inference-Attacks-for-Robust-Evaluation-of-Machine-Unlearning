@@ -209,6 +209,7 @@ def _ignored_parameters(
     consumed_by_bridge = consumed_by_bridge or set()
     consumed_by_strategy_map: dict[str, set[str]] = {
         "scrub": {
+            "gamma",
             "epochs",
             "lr",
             "distill_weight",
@@ -407,7 +408,6 @@ def main() -> None:
             method_cfg,
             consumed_by_bridge=consumed_method_cfg_keys_by_bridge,
         )
-
         print("Unlearning bridge verification")
         print(f"  method={args.unlearning_method}")
         print(f"  strategy_called={strategy_fn_name}")

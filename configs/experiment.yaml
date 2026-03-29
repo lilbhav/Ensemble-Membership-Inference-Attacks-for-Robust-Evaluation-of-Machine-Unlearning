@@ -52,18 +52,19 @@ training:
     methods:
       scrub:
         mode: teacher_loaded
-        epochs: 12
-        lr: 0.0005
-        distill_weight: 0.03
-        forget_loss_weight: 1.0
-        maximize_epochs: 5
-        maximize_steps: 3
+        epochs: 14
+        lr: 0.0007
+        gamma: 0.96
+        distill_weight: 0.01
+        forget_loss_weight: 1.5
+        maximize_epochs: 8
+        maximize_steps: 4
         minimize_steps: 1
         kd_temperature: 4.0
         weight_decay: 0
         momentum: 0.9
-        lr_decay_epochs: []
-        lr_decay_rate: 0
+        lr_decay_epochs: [9, 12]
+        lr_decay_rate: 0.2
       ssd:
         # selection_weighting (α): selects synapses where forget_importance > α × retain_importance.
         # Higher = more selective (fewer synapses modified). Default 10.
