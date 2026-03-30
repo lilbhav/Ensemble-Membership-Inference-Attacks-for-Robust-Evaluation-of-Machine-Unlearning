@@ -658,8 +658,9 @@ def train_distill(
         if split == "minimize":
             loss = gamma * loss_cls + alpha * loss_div + beta * loss_kd
         elif split == "maximize":
-            # Let wrapper-side SCRUB tuning increase forget pressure explicitly.
-            loss = -(1.0 + beta) * loss_div
+            # Preserve original behavior at beta=1.0; beta>1.0 increases forget pressure.
+            maximize_scale = beta if beta > 0 else 1.0
+            loss = -maximize_scale * loss_div
 
         loss = loss
 
