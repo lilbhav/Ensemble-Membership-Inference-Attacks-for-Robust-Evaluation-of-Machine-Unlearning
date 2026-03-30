@@ -217,6 +217,7 @@ def _ignored_parameters(
             "maximize_epochs",
             "maximize_steps",
             "minimize_steps",
+            "post_maximize_repair_scale",
             "kd_temperature",
             "weight_decay",
             "momentum",

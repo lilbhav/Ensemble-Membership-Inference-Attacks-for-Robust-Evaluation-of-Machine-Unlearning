@@ -217,6 +217,7 @@ def scrub(
     msteps = int(getattr(args, "maximize_epochs", 2))
     maximize_steps = int(getattr(args, "maximize_steps", 1))
     minimize_steps = int(getattr(args, "minimize_steps", 1))
+    post_maximize_repair_scale = float(getattr(args, "post_maximize_repair_scale", 1.0))
     kd_T = float(getattr(args, "kd_temperature", 4.0))
 
     sgda_epochs = int(getattr(args, "epochs", 3))
@@ -284,6 +285,11 @@ def scrub(
                     alpha= alpha,
                     beta= beta,
                     split= "maximize")
+        minimize_gamma = gamma
+        minimize_alpha = alpha
+        if epoch > msteps:
+            minimize_gamma *= post_maximize_repair_scale
+            minimize_alpha *= post_maximize_repair_scale
         for _ in range(minimize_steps):
             train_acc, train_loss = train_distill(
                 epoch= epoch,
@@ -292,8 +298,8 @@ def scrub(
                 swa_model= None,
                 criterion_list= criterion_list,
                 optimizer= optimizer,
-                gamma= gamma,
-                alpha= alpha,
+                gamma= minimize_gamma,
+                alpha= minimize_alpha,
                 beta= beta,
                 split= "minimize",
                 quiet= True)
