@@ -13,6 +13,48 @@ import torch.nn as nn
 from torch.utils.data import ConcatDataset, DataLoader, Subset
 
 
+def safe_auc(labels: np.ndarray, scores: np.ndarray) -> float:
+    if len(np.unique(labels)) < 2:
+        return float("nan")
+    from sklearn.metrics import roc_auc_score  # type: ignore
+
+    return float(roc_auc_score(labels, scores))
+
+
+def orient_scores_for_membership(attack_name: str, scores: np.ndarray, labels: np.ndarray) -> tuple[np.ndarray, str]:
+    if attack_name not in {"lira", "lira_offline"}:
+        return scores, "original"
+
+    auc_original = safe_auc(labels, scores)
+    auc_negated = safe_auc(labels, -scores)
+    if not np.isnan(auc_original) and not np.isnan(auc_negated) and auc_negated > auc_original:
+        return -scores, "negated"
+    return scores, "original"
+
+
+def compute_threshold_at_target_fpr(labels: np.ndarray, scores: np.ndarray, target_fpr: float) -> float:
+    from sklearn.metrics import roc_curve  # type: ignore
+
+    fpr_arr, tpr_arr, thresholds = roc_curve(labels, scores)
+    eligible = [
+        (float(threshold), float(tpr), float(fpr))
+        for fpr, tpr, threshold in zip(fpr_arr, tpr_arr, thresholds)
+        if fpr <= target_fpr
+    ]
+    if eligible:
+        threshold, _, _ = max(eligible, key=lambda item: (item[1], -item[2], item[0]))
+        return threshold
+    return float(np.max(scores) + 1e-12)
+
+
+def confusion_rates(labels: np.ndarray, predictions: np.ndarray) -> tuple[float, float]:
+    member_mask = labels == 1
+    nonmember_mask = labels == 0
+    tpr = float((predictions[member_mask] == 1).sum() / max(1, int(member_mask.sum())))
+    fpr = float((predictions[nonmember_mask] == 1).sum() / max(1, int(nonmember_mask.sum())))
+    return tpr, fpr
+
+
 def configure_torch_pickle_compat() -> None:
     """Make torch.load backward-compatible with pickled non-tensor objects.
 
@@ -55,6 +97,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--unlearning-method", required=True)
     p.add_argument("--model-name", required=True)
     p.add_argument("--num-shadow-models", type=int, default=10)
+    p.add_argument("--target-fpr", type=float, default=0.01)
     return p.parse_args()
 
 
@@ -290,6 +333,11 @@ def main() -> None:
 
     attack.prepare(aux_ds)
     pred_scores = np.asarray(attack.infer(target_ds), dtype=float)
+    pred_scores, score_direction = orient_scores_for_membership(attack_name, pred_scores, target_membership)
+    calibrated_threshold = compute_threshold_at_target_fpr(target_membership, pred_scores, args.target_fpr)
+    calibrated_predictions = (pred_scores >= calibrated_threshold).astype(int)
+    calibrated_tpr, calibrated_fpr = confusion_rates(target_membership, calibrated_predictions)
+    coverage_fraction = float(np.mean(calibrated_predictions)) if len(calibrated_predictions) > 0 else 0.0
 
     train_size = len(train_dataset)
 
@@ -325,7 +373,10 @@ def main() -> None:
                 "attack_name": attack_name,
                 "attack_seed": args.attack_seed,
                 "score": float(score),
-                "prediction": int(score >= 0.5),
+                "prediction": int(calibrated_predictions[i]),
+                "calibrated_threshold": float(calibrated_threshold),
+                "calibration_target_fpr": float(args.target_fpr),
+                "score_direction": score_direction,
                 "dataset": args.dataset,
                 "base_seed": args.base_seed,
             }
@@ -348,6 +399,9 @@ def main() -> None:
         "attack_seed",
         "score",
         "prediction",
+        "calibrated_threshold",
+        "calibration_target_fpr",
+        "score_direction",
         "dataset",
         "base_seed",
     ]
@@ -355,6 +409,24 @@ def main() -> None:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(rows)
+
+    calibration_summary = {
+        "dataset": args.dataset,
+        "base_seed": args.base_seed,
+        "unlearning_method": args.unlearning_method,
+        "attack_name": attack_name,
+        "attack_seed": args.attack_seed,
+        "target_name": args.target_name,
+        "target_fpr": float(args.target_fpr),
+        "calibrated_threshold": float(calibrated_threshold),
+        "score_direction": score_direction,
+        "calibrated_tpr": float(calibrated_tpr),
+        "calibrated_fpr": float(calibrated_fpr),
+        "coverage_fraction": float(coverage_fraction),
+    }
+    calibration_path = output_csv.with_name(f"{output_csv.stem}_calibration.json")
+    with calibration_path.open("w", encoding="utf-8") as f:
+        json.dump(calibration_summary, f, indent=2)
 
 
 if __name__ == "__main__":

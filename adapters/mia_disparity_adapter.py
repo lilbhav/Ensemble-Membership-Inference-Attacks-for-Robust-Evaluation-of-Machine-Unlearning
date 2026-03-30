@@ -29,6 +29,7 @@ class MiaDisparityAdapter:
         unlearning_method: str,
         model_name: str,
         num_shadow_models: int = 10,
+        target_fpr: float = 0.01,
     ) -> None:
         # Build bridge command line for one attack/target/model combination
         cmd = [
@@ -66,6 +67,8 @@ class MiaDisparityAdapter:
             model_name,
             "--num-shadow-models",
             str(num_shadow_models),
+            "--target-fpr",
+            str(target_fpr),
         ]
         # Run from project root to keep path assumptions consistent
         run_subprocess(cmd, cwd=self.project_root)

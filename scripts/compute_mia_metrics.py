@@ -1,11 +1,12 @@
-"""compute_mia_metrics.py — Compute AUC, TPR@1%FPR, and TPR@0.1%FPR from per-sample MIA score CSVs.
+"""compute_mia_metrics.py — Compute calibrated threshold and attack metrics from per-sample MIA score CSVs.
 
 Reads:  results/mia/<dataset>/seed_<seed>/<method>/<attack>/<target>_attack_seed_<n>.csv
 Writes: results/aggregate/mia_score_metrics.csv
 
 Output columns:
     dataset, base_seed, unlearning_method, attack_name, attack_seed, target,
-    split_mode, target_class, n_samples, auc, tpr_at_1pct_fpr, tpr_at_01pct_fpr
+    split_mode, target_class, n_samples, calibrated_threshold, auc,
+    balanced_accuracy, tpr_at_1pct_fpr, coverage_fraction, score_direction
 """
 from __future__ import annotations
 
@@ -28,9 +29,12 @@ FIELDS = [
     "split_mode",
     "target_class",
     "n_samples",
+    "calibrated_threshold",
     "auc",
+    "balanced_accuracy",
     "tpr_at_1pct_fpr",
-    "tpr_at_01pct_fpr",
+    "coverage_fraction",
+    "score_direction",
 ]
 
 
@@ -49,19 +53,32 @@ def parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
-def read_score_csv(path: Path) -> tuple[list[float], list[int], dict]:
-    """Return (scores, labels, metadata) from a per-sample attack CSV."""
+def read_score_csv(path: Path) -> tuple[list[float], list[int], list[int], dict]:
+    """Return (scores, labels, predictions, metadata) from a per-sample attack CSV."""
     scores: list[float] = []
     labels: list[int] = []
+    predictions: list[int] = []
     meta: dict = {}
     with path.open("r", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         for row in reader:
             scores.append(float(row["score"]))
             labels.append(int(row["true_membership"]))
+            predictions.append(int(row["prediction"]))
             if not meta:
-                meta = {k: row.get(k, "") for k in ("split_mode", "target_class", "dataset", "base_seed")}
-    return scores, labels, meta
+                meta = {
+                    k: row.get(k, "")
+                    for k in (
+                        "split_mode",
+                        "target_class",
+                        "dataset",
+                        "base_seed",
+                        "calibrated_threshold",
+                        "calibration_target_fpr",
+                        "score_direction",
+                    )
+                }
+    return scores, labels, predictions, meta
 
 
 def tpr_at_fpr_threshold(fpr_arr, tpr_arr, threshold: float) -> float:
@@ -70,15 +87,16 @@ def tpr_at_fpr_threshold(fpr_arr, tpr_arr, threshold: float) -> float:
     return max(eligible) if eligible else 0.0
 
 
-def compute_metrics(scores: list[float], labels: list[int]):
-    """Return (auc, tpr_at_1pct, tpr_at_01pct) using sklearn."""
-    from sklearn.metrics import roc_auc_score, roc_curve  # type: ignore
+def compute_metrics(scores: list[float], labels: list[int], predictions: list[int]):
+    """Return (auc, balanced_accuracy, tpr_at_1pct, coverage_fraction) using sklearn."""
+    from sklearn.metrics import balanced_accuracy_score, roc_auc_score, roc_curve  # type: ignore
 
     auc = float(roc_auc_score(labels, scores))
     fpr_arr, tpr_arr, _ = roc_curve(labels, scores)
     tpr_1pct = tpr_at_fpr_threshold(fpr_arr, tpr_arr, 0.01)
-    tpr_01pct = tpr_at_fpr_threshold(fpr_arr, tpr_arr, 0.001)
-    return auc, tpr_1pct, tpr_01pct
+    balanced_accuracy = float(balanced_accuracy_score(labels, predictions))
+    coverage_fraction = float(sum(predictions) / max(1, len(predictions)))
+    return auc, balanced_accuracy, tpr_1pct, coverage_fraction
 
 
 def process_seed(mia_root: Path, dataset: str, seed: int, target_filter: str | None) -> list[dict]:
@@ -105,7 +123,7 @@ def process_seed(mia_root: Path, dataset: str, seed: int, target_filter: str | N
                 if target_filter and target_name != target_filter:
                     continue
 
-                scores, labels, meta = read_score_csv(score_file)
+                scores, labels, predictions, meta = read_score_csv(score_file)
                 n = len(scores)
                 if n == 0:
                     continue
@@ -114,7 +132,7 @@ def process_seed(mia_root: Path, dataset: str, seed: int, target_filter: str | N
                     continue
 
                 try:
-                    auc, tpr_1pct, tpr_01pct = compute_metrics(scores, labels)
+                    auc, balanced_accuracy, tpr_1pct, coverage_fraction = compute_metrics(scores, labels, predictions)
                 except Exception as exc:
                     print(f"  Warning: metrics failed for {score_file}: {exc}")
                     continue
@@ -129,9 +147,12 @@ def process_seed(mia_root: Path, dataset: str, seed: int, target_filter: str | N
                     "split_mode": meta.get("split_mode", ""),
                     "target_class": meta.get("target_class", ""),
                     "n_samples": n,
+                    "calibrated_threshold": meta.get("calibrated_threshold", ""),
                     "auc": round(auc, 6),
+                    "balanced_accuracy": round(balanced_accuracy, 6),
                     "tpr_at_1pct_fpr": round(tpr_1pct, 6),
-                    "tpr_at_01pct_fpr": round(tpr_01pct, 6),
+                    "coverage_fraction": round(coverage_fraction, 6),
+                    "score_direction": meta.get("score_direction", ""),
                 })
 
     return rows
