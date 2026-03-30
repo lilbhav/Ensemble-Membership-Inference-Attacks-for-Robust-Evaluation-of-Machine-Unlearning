@@ -52,13 +52,13 @@ training:
     methods:
       scrub:
         mode: teacher_loaded
-        epochs: 12
+        epochs: 13
         lr: 0.0005
         gamma: 0.985
         distill_weight: 0.03
-        forget_loss_weight: 1.25
-        maximize_epochs: 8
-        maximize_steps: 4
+        forget_loss_weight: 1.2
+        maximize_epochs: 7
+        maximize_steps: 3
         minimize_steps: 1
         kd_temperature: 4.0
         weight_decay: 0
