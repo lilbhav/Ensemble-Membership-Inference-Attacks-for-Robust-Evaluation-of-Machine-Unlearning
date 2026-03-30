@@ -60,7 +60,7 @@ training:
         maximize_epochs: 6
         maximize_steps: 3
         minimize_steps: 1
-        post_maximize_repair_scale: 0.7
+        post_maximize_repair_scale: 0.6
         kd_temperature: 4.0
         weight_decay: 0
         momentum: 0.9
