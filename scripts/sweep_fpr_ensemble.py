@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import argparse
 import csv
+from itertools import combinations
 from pathlib import Path
 
 import numpy as np
-from sklearn.metrics import roc_curve
+from sklearn.metrics import roc_auc_score, roc_curve
 
 
 def parse_args() -> argparse.Namespace:
@@ -60,6 +61,19 @@ def confusion(y: np.ndarray, p: np.ndarray) -> tuple[float, float, float]:
     return float(tpr), float(fpr), float(acc)
 
 
+def jaccard(a: set[int], b: set[int]) -> float:
+    denom = len(a | b)
+    if denom == 0:
+        return 0.0
+    return float(len(a & b) / denom)
+
+
+def safe_auc(y: np.ndarray, s: np.ndarray) -> float:
+    if len(np.unique(y)) < 2:
+        return float("nan")
+    return float(roc_auc_score(y, s))
+
+
 def main() -> None:
     args = parse_args()
     root = Path(args.results_root)
@@ -106,24 +120,43 @@ def main() -> None:
 
     attacks = sorted(attack_to_scores.keys())
     y = labels
+    sid = sample_ids if sample_ids is not None else np.arange(len(y))
+
+    # Global score-direction normalization per attack: if AUC(score) < 0.5, flip sign.
+    attack_to_scores_oriented: dict[str, np.ndarray] = {}
+    attack_flip_info: dict[str, dict] = {}
+    for attack in attacks:
+        s = attack_to_scores[attack]
+        auc_orig = safe_auc(y, s)
+        flip = bool(not np.isnan(auc_orig) and auc_orig < 0.5)
+        s_used = -s if flip else s
+        auc_after = safe_auc(y, s_used)
+        attack_to_scores_oriented[attack] = s_used
+        attack_flip_info[attack] = {
+            "sign_flip": flip,
+            "auc_after_flip": auc_after,
+        }
 
     sweep_rows: list[dict] = []
     coverage_rows: list[dict] = []
     activation_rows: list[dict] = []
+    jaccard_rows: list[dict] = []
+    attack_summary_5pct_rows: list[dict] = []
 
     first_active: dict[str, float | None] = {a: None for a in attacks}
 
     for target_fpr in args.fprs:
         attack_preds: dict[str, np.ndarray] = {}
-        attack_cov: dict[str, float] = {}
+        attack_positive_sets: dict[str, set[int]] = {}
 
         for attack in attacks:
-            s = attack_to_scores[attack]
+            s = attack_to_scores_oriented[attack]
             thr = threshold_at_target_fpr(y, s, target_fpr)
             p = (s >= thr).astype(int)
             attack_preds[attack] = p
             cov = float(np.mean(p))
-            attack_cov[attack] = cov
+            positives = set(sid[p == 1].tolist())
+            attack_positive_sets[attack] = positives
             if cov > 0 and first_active[attack] is None:
                 first_active[attack] = target_fpr
 
@@ -138,6 +171,34 @@ def main() -> None:
                     "attack": attack,
                     "coverage_fraction": round(cov, 6),
                     "threshold": float(thr),
+                    "sign_flip": bool(attack_flip_info[attack]["sign_flip"]),
+                    "auc_after_flip": round(float(attack_flip_info[attack]["auc_after_flip"]), 6),
+                }
+            )
+
+            if abs(target_fpr - 0.05) < 1e-12:
+                attack_summary_5pct_rows.append(
+                    {
+                        "attack": attack,
+                        "sign_flip": bool(attack_flip_info[attack]["sign_flip"]),
+                        "AUC_after_flip": round(float(attack_flip_info[attack]["auc_after_flip"]), 6),
+                        "threshold": float(thr),
+                        "coverage@5%": round(cov, 6),
+                    }
+                )
+
+        for a1, a2 in combinations(attacks, 2):
+            jaccard_rows.append(
+                {
+                    "dataset": args.dataset,
+                    "base_seed": args.seed,
+                    "unlearning_method": args.method,
+                    "target": args.target,
+                    "attack_seed": args.attack_seed,
+                    "target_fpr": target_fpr,
+                    "attack_a": a1,
+                    "attack_b": a2,
+                    "jaccard": round(jaccard(attack_positive_sets[a1], attack_positive_sets[a2]), 6),
                 }
             )
 
@@ -205,7 +266,14 @@ def main() -> None:
         out_dir / f"{base}_coverage_per_attack.csv",
         coverage_rows,
         [
-            "dataset", "base_seed", "unlearning_method", "target", "attack_seed", "target_fpr", "attack", "coverage_fraction", "threshold",
+            "dataset", "base_seed", "unlearning_method", "target", "attack_seed", "target_fpr", "attack", "coverage_fraction", "threshold", "sign_flip", "auc_after_flip",
+        ],
+    )
+    write_csv(
+        out_dir / f"{base}_pairwise_jaccard.csv",
+        jaccard_rows,
+        [
+            "dataset", "base_seed", "unlearning_method", "target", "attack_seed", "target_fpr", "attack_a", "attack_b", "jaccard",
         ],
     )
     write_csv(
@@ -215,10 +283,19 @@ def main() -> None:
             "dataset", "base_seed", "unlearning_method", "target", "attack_seed", "attack", "first_active_target_fpr",
         ],
     )
+    write_csv(
+        out_dir / f"{base}_attack_flip_5pct_table.csv",
+        attack_summary_5pct_rows,
+        [
+            "attack", "sign_flip", "AUC_after_flip", "threshold", "coverage@5%",
+        ],
+    )
 
     print(f"Saved sweep summary: {out_dir / f'{base}.csv'}")
     print(f"Saved per-attack coverage: {out_dir / f'{base}_coverage_per_attack.csv'}")
+    print(f"Saved pairwise Jaccard: {out_dir / f'{base}_pairwise_jaccard.csv'}")
     print(f"Saved activation order: {out_dir / f'{base}_activation_order.csv'}")
+    print(f"Saved 5% attack table: {out_dir / f'{base}_attack_flip_5pct_table.csv'}")
 
 
 if __name__ == "__main__":

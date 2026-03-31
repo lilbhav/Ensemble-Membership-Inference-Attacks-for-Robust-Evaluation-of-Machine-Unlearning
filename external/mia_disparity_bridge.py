@@ -21,15 +21,14 @@ def safe_auc(labels: np.ndarray, scores: np.ndarray) -> float:
     return float(roc_auc_score(labels, scores))
 
 
-def orient_scores_for_membership(attack_name: str, scores: np.ndarray, labels: np.ndarray) -> tuple[np.ndarray, str]:
-    if attack_name not in {"lira", "lira_offline"}:
-        return scores, "original"
-
+def orient_scores_for_membership(scores: np.ndarray, labels: np.ndarray) -> tuple[np.ndarray, str, float]:
     auc_original = safe_auc(labels, scores)
-    auc_negated = safe_auc(labels, -scores)
-    if not np.isnan(auc_original) and not np.isnan(auc_negated) and auc_negated > auc_original:
-        return -scores, "negated"
-    return scores, "original"
+    if np.isnan(auc_original):
+        return scores, "original", auc_original
+    if auc_original < 0.5:
+        scores = -scores
+        return scores, "negated", safe_auc(labels, scores)
+    return scores, "original", auc_original
 
 
 def compute_threshold_at_target_fpr(labels: np.ndarray, scores: np.ndarray, target_fpr: float) -> float:
@@ -333,7 +332,7 @@ def main() -> None:
 
     attack.prepare(aux_ds)
     pred_scores = np.asarray(attack.infer(target_ds), dtype=float)
-    pred_scores, score_direction = orient_scores_for_membership(attack_name, pred_scores, target_membership)
+    pred_scores, score_direction, auc_after_flip = orient_scores_for_membership(pred_scores, target_membership)
     calibrated_threshold = compute_threshold_at_target_fpr(target_membership, pred_scores, args.target_fpr)
     calibrated_predictions = (pred_scores >= calibrated_threshold).astype(int)
     calibrated_tpr, calibrated_fpr = confusion_rates(target_membership, calibrated_predictions)
@@ -377,6 +376,7 @@ def main() -> None:
                 "calibrated_threshold": float(calibrated_threshold),
                 "calibration_target_fpr": float(args.target_fpr),
                 "score_direction": score_direction,
+                "auc_after_flip": float(auc_after_flip),
                 "dataset": args.dataset,
                 "base_seed": args.base_seed,
             }
@@ -402,6 +402,7 @@ def main() -> None:
         "calibrated_threshold",
         "calibration_target_fpr",
         "score_direction",
+        "auc_after_flip",
         "dataset",
         "base_seed",
     ]
@@ -420,6 +421,7 @@ def main() -> None:
         "target_fpr": float(args.target_fpr),
         "calibrated_threshold": float(calibrated_threshold),
         "score_direction": score_direction,
+        "auc_after_flip": float(auc_after_flip),
         "calibrated_tpr": float(calibrated_tpr),
         "calibrated_fpr": float(calibrated_fpr),
         "coverage_fraction": float(coverage_fraction),
