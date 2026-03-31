@@ -63,7 +63,7 @@ def main() -> None:
 
     if mia_rows:
         with (aggregate_dir / "mia_predictions_all.csv").open("w", newline="", encoding="utf-8") as f:
-            fields = [
+            base_fields = [
                 "sample_id",
                 "true_membership",
                 "split_name",
@@ -80,6 +80,9 @@ def main() -> None:
                 "dataset",
                 "base_seed",
             ]
+            # Keep canonical columns first, then append any new per-row fields emitted by newer MIA runs.
+            extra_fields = sorted({k for row in mia_rows for k in row.keys() if k not in base_fields})
+            fields = base_fields + extra_fields
             writer = csv.DictWriter(f, fieldnames=fields)
             writer.writeheader()
             writer.writerows(mia_rows)
