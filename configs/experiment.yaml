@@ -13,8 +13,7 @@ experiment:
 split:
   split_mode: targeted_random
   target_class: 0
-  # CIFAR100 stronger-signal default: forget 250 samples from the target class.
-  # For a larger variant, use configs/experiment_cifar100_forget500.yaml.
+  # CIFAR100 run: fixed forget set size for stronger and more stable signal.
   forget_fraction: null
   forget_count: 250
 
@@ -28,9 +27,11 @@ training:
     weight_decay: 0.0005
     lr_scheduler: cosine
   unlearning:
-    epochs: 2
-    batch_size: 64
-    lr: 0.0002
+    # Global defaults used by methods that do not expose rich per-method knobs
+    # (notably amnesiac in the current third-party implementation).
+    epochs: 3
+    batch_size: 128
+    lr: 0.00015
     optimizer: adam
     momentum: 0.5
     scrub_sweep:
@@ -54,28 +55,28 @@ training:
     methods:
       scrub:
         mode: teacher_loaded
-        epochs: 20
-        lr: 0.0007
+        epochs: 24
+        lr: 0.0008
         gamma: 0.985
         distill_weight: 0.03
-        forget_loss_weight: 1.2
-        maximize_epochs: 8
+        forget_loss_weight: 1.8
+        maximize_epochs: 10
         maximize_steps: 3
         minimize_steps: 1
-        post_maximize_repair_scale: 0.6
+        post_maximize_repair_scale: 0.55
         kd_temperature: 4.0
         weight_decay: 0
         momentum: 0.9
-        lr_decay_epochs: [12, 16]
+        lr_decay_epochs: [14, 20]
         lr_decay_rate: 0.3
       ssd:
         # selection_weighting (α): selects synapses where forget_importance > α × retain_importance.
         # Higher = more selective (fewer synapses modified). Default 10.
-        selection_weighting: 20
+        selection_weighting: 40
         # dampening_constant (λ): each selected synapse is multiplied by (λ × oimp / fimp).
         # Higher = less aggressive per synapse. Default 1 → weights oimp/fimp (<0.1 for selected).
         # 5 → max 50% reduction at boundary; 10 → zero net change at boundary.
-        dampening_constant: 10
+        dampening_constant: 20
         # Keep remaining SSD parameters at their defaults.
         lower_bound: 1
         exponent: 1
@@ -84,15 +85,15 @@ training:
         forget_threshold: 1
       bad_teacher:
         # epochs: number of distillation passes — primary driver of forgetting.
-        epochs: 12
+        epochs: 15
         # kl_temperature: softer distributions from higher T make distillation smoother.
         kl_temperature: 4.0
         # retain_subset_fraction: fraction of retain set used per epoch.
-        retain_subset_fraction: 0.5
+        retain_subset_fraction: 0.6
       amnesiac: {}
 
 unlearning:
-  methods: [scrub, bad_teacher]
+  methods: [amnesiac, bad_teacher, scrub, ssd]
 
 mia:
   attacks: [yeom, shokri, lira, reference, losstraj, calibration, aug]
