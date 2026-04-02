@@ -32,14 +32,26 @@ def parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
+def resolve_model_path(results_root: Path, dataset: str, seed: int, filename: str) -> Path:
+    canonical = results_root / "models" / dataset / f"seed_{seed}" / filename
+    if canonical.exists():
+        return canonical
+
+    legacy_flat = results_root / "models" / dataset / filename
+    if legacy_flat.exists():
+        return legacy_flat
+
+    return canonical
+
+
 def collect_model_specs(results_root: Path, dataset: str, seed: int, method_filter: str | None):
     # Baseline model is always a candidate attack target
-    model_specs = [("baseline", "baseline", results_root / "models" / dataset / f"seed_{seed}" / "baseline.pt")]
+    model_specs = [("baseline", "baseline", resolve_model_path(results_root, dataset, seed, "baseline.pt"))]
 
     for method in ["scrub", "ssd", "bad_teacher", "amnesiac"]:
         if method_filter and method_filter != method:
             continue
-        model_specs.append((f"unlearn_{method}", method, results_root / "models" / dataset / f"seed_{seed}" / f"unlearn_{method}.pt"))
+        model_specs.append((f"unlearn_{method}", method, resolve_model_path(results_root, dataset, seed, f"unlearn_{method}.pt")))
 
     if method_filter == "baseline":
         return [model_specs[0]]

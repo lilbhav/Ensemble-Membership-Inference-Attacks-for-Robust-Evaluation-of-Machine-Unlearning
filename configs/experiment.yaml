@@ -54,19 +54,19 @@ training:
     methods:
       scrub:
         mode: teacher_loaded
-        epochs: 30
-        lr: 0.001
+        epochs: 20
+        lr: 0.0007
         gamma: 0.985
-        distill_weight: 0.015
-        forget_loss_weight: 3.0
-        maximize_epochs: 12
-        maximize_steps: 4
+        distill_weight: 0.03
+        forget_loss_weight: 1.2
+        maximize_epochs: 8
+        maximize_steps: 3
         minimize_steps: 1
-        post_maximize_repair_scale: 0.5
+        post_maximize_repair_scale: 0.6
         kd_temperature: 4.0
         weight_decay: 0
         momentum: 0.9
-        lr_decay_epochs: [18, 26]
+        lr_decay_epochs: [12, 16]
         lr_decay_rate: 0.3
       ssd:
         # selection_weighting (α): selects synapses where forget_importance > α × retain_importance.

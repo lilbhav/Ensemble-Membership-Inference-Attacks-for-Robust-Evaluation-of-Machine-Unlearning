@@ -38,6 +38,18 @@ def parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
+def resolve_model_path(results_root: Path, dataset: str, seed: int, filename: str) -> Path:
+    canonical = results_root / "models" / dataset / f"seed_{seed}" / filename
+    if canonical.exists():
+        return canonical
+
+    legacy_flat = results_root / "models" / dataset / filename
+    if legacy_flat.exists():
+        return legacy_flat
+
+    return canonical
+
+
 def validate_targeted_random_split(split_file: Path) -> dict:
     if not split_file.exists():
         raise FileNotFoundError(f"Missing split file: {split_file}. Run scripts/prepare_splits.py first.")
@@ -148,11 +160,13 @@ def main() -> None:
     split_file = results_root / "splits" / dataset / f"seed_{seed}.npz"
     split_meta = validate_targeted_random_split(split_file)
 
-    model_dir = ensure_dir(results_root / "models" / dataset / f"seed_{seed}")
-    baseline_model = model_dir / "baseline.pt"
+    model_dir = results_root / "models" / dataset / f"seed_{seed}"
+    baseline_model = resolve_model_path(results_root, dataset, seed, "baseline.pt")
     baseline_metrics_path = baseline_model.with_suffix(".metrics.json")
 
     if args.retrain_baseline or not baseline_model.exists() or not baseline_metrics_path.exists():
+        ensure_dir(model_dir)
+        baseline_model = model_dir / "baseline.pt"
         adapter.run_baseline(
             dataset=dataset,
             seed=seed,
@@ -163,10 +177,14 @@ def main() -> None:
             training_cfg=cfg["training"]["baseline"],
             device=cfg["experiment"].get("device", "cuda"),
         )
+        baseline_metrics_path = baseline_model.with_suffix(".metrics.json")
 
-    unlearn_model = model_dir / f"unlearn_{method}.pt"
+    unlearn_model = resolve_model_path(results_root, dataset, seed, f"unlearn_{method}.pt")
     unlearn_metrics_path = unlearn_model.with_suffix(".metrics.json")
     if args.rerun_unlearning or not unlearn_model.exists() or not unlearn_metrics_path.exists():
+        ensure_dir(model_dir)
+        unlearn_model = model_dir / f"unlearn_{method}.pt"
+        unlearn_metrics_path = unlearn_model.with_suffix(".metrics.json")
         adapter.run_unlearning(
             dataset=dataset,
             seed=seed,
@@ -183,7 +201,7 @@ def main() -> None:
         print(f"Reusing existing unlearned model: {unlearn_model}")
 
     baseline_metrics = read_metrics(baseline_metrics_path)
-    unlearn_metrics = read_metrics(unlearn_model.with_suffix(".metrics.json"))
+    unlearn_metrics = read_metrics(unlearn_metrics_path)
 
     summary = summarize_utility(
         method=method,

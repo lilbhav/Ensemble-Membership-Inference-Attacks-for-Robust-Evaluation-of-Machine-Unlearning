@@ -48,7 +48,9 @@ def parse_args() -> argparse.Namespace:
 
 
 def collect_rows(results_root: Path, dataset: str, seed: int) -> list[dict]:
-    utility_dir = results_root / "utility" / dataset / f"seed_{seed}"
+    utility_root = results_root / "utility" / dataset
+    canonical_dir = utility_root / f"seed_{seed}"
+    utility_dir = canonical_dir if canonical_dir.exists() else utility_root
     if not utility_dir.exists():
         return []
 
@@ -57,6 +59,8 @@ def collect_rows(results_root: Path, dataset: str, seed: int) -> list[dict]:
 
     for method_dir in sorted(utility_dir.iterdir()):
         if not method_dir.is_dir():
+            continue
+        if method_dir.name.startswith("seed_"):
             continue
         summary_file = method_dir / "utility_summary.json"
         if not summary_file.exists():
@@ -88,12 +92,12 @@ def collect_rows(results_root: Path, dataset: str, seed: int) -> list[dict]:
 
         method_rows.append({
             **common,
-            "model": s.get("unlearning_method", method_dir.name),
+            "model": s.get("unlearning_method", s.get("method", method_dir.name)),
             "train_acc": None,  # not collected for unlearned models
-            "retain_acc": s.get("unlearn_retain_acc"),
-            "forget_acc": s.get("unlearn_forget_acc"),
-            "test_acc": s.get("unlearn_test_acc"),
-            "utility_drop": s.get("utility_drop"),
+            "retain_acc": s.get("unlearned_retain_acc", s.get("unlearn_retain_acc")),
+            "forget_acc": s.get("unlearned_forget_acc", s.get("unlearn_forget_acc")),
+            "test_acc": s.get("unlearned_test_acc", s.get("unlearn_test_acc")),
+            "utility_drop": s.get("utility_drop", s.get("test_drop")),
             "retain_drop": s.get("retain_drop"),
             "forget_drop": s.get("forget_drop"),
         })

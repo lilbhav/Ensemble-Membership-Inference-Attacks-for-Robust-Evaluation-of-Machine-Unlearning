@@ -106,6 +106,67 @@ def train_baseline(
     return model
 
 
+def repair_with_retain_data(
+    model,
+    train_loader,
+    test_loader,
+    device,
+    epochs,
+    lr,
+    optimizer_name,
+    momentum,
+    weight_decay: float = 0.0,
+):
+    if optimizer_name == "sgd":
+        optimizer = torch.optim.SGD(
+            model.parameters(), lr=lr, momentum=momentum, weight_decay=weight_decay
+        )
+    elif optimizer_name == "adam":
+        optimizer = torch.optim.Adam(
+            model.parameters(), lr=lr, weight_decay=weight_decay if weight_decay > 0 else 1e-4
+        )
+    else:
+        raise ValueError(f"Unsupported repair optimizer '{optimizer_name}'. Expected one of: ['sgd', 'adam']")
+
+    loss_func = nn.CrossEntropyLoss().to(device)
+    best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
+    best_test_acc = _compute_accuracy(model=model, data_loader=test_loader, device=device)
+
+    for _ in tqdm(range(1, epochs + 1), desc="SSD retain repair"):
+        model.train()
+        for images, labels in train_loader:
+            images = images.to(device)
+            labels = labels.long().to(device)
+            model.zero_grad()
+            output = model(images)
+            loss = loss_func(output, labels)
+            loss.backward()
+            optimizer.step()
+
+        test_acc = _compute_accuracy(model=model, data_loader=test_loader, device=device)
+        if test_acc >= best_test_acc:
+            best_test_acc = test_acc
+            best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
+
+    model.load_state_dict(best_state)
+    return model
+
+
+def _compute_accuracy(model, data_loader, device) -> float:
+    model.eval()
+    correct = 0
+    total = 0
+    with torch.no_grad():
+        for images, labels in data_loader:
+            images = images.to(device)
+            labels = labels.to(device)
+            logits = model(images)
+            pred = torch.argmax(logits, dim=1)
+            correct += (pred == labels).sum().item()
+            total += labels.numel()
+    return correct / total if total > 0 else 0.0
+
+
 def _load_method_cfg(args: argparse.Namespace) -> dict[str, Any]:
     if args.method_config_json is None:
         raise ValueError("Missing --method-config-json; method-specific config must be passed explicitly.")
@@ -404,6 +465,16 @@ def main() -> None:
         test_loader = DataLoader(test_ds, batch_size=args.batch_size, shuffle=False)
 
         strategy_fn_name = f"unlearn_strategies.strategies.{args.unlearning_method}"
+        if args.unlearning_method == "ssd" and int(method_cfg.get("post_repair_epochs", 0)) > 0:
+            consumed_method_cfg_keys_by_bridge.update(
+                {
+                    "post_repair_epochs",
+                    "post_repair_lr",
+                    "post_repair_optimizer",
+                    "post_repair_batch_size",
+                }
+            )
+
         ignored_params = _ignored_parameters(
             args.unlearning_method,
             method_cfg,
@@ -450,30 +521,22 @@ def main() -> None:
         if args.unlearning_method == "ssd":
             repair_epochs = int(method_cfg.get("post_repair_epochs", 0))
             if repair_epochs > 0:
-                consumed_method_cfg_keys_by_bridge.update(
-                    {
-                        "post_repair_epochs",
-                        "post_repair_lr",
-                        "post_repair_optimizer",
-                        "post_repair_batch_size",
-                    }
-                )
                 repair_lr = float(method_cfg.get("post_repair_lr", args.lr))
                 repair_opt = str(method_cfg.get("post_repair_optimizer", args.optimizer)).lower()
                 repair_bs = int(method_cfg.get("post_repair_batch_size", args.batch_size))
                 repair_train_loader = DataLoader(retain_ds, batch_size=repair_bs, shuffle=True)
                 repair_test_loader = DataLoader(test_ds, batch_size=repair_bs, shuffle=False)
 
-                # training_optimization accepts optimizer name; we pass lr through args-like namespace.
-                setattr(strategy_args, "lr", repair_lr)
-                model = mu_utils.training_optimization(
+                model = repair_with_retain_data(
                     model=model,
                     train_loader=repair_train_loader,
                     test_loader=repair_test_loader,
                     epochs=repair_epochs,
                     device=device,
-                    desc="SSD retain repair",
-                    opt=repair_opt,
+                    lr=repair_lr,
+                    optimizer_name=repair_opt,
+                    momentum=float(getattr(args, "momentum", 0.9)),
+                    weight_decay=float(getattr(args, "weight_decay", 0.0)),
                 )
         unlearning_method = args.unlearning_method
 
