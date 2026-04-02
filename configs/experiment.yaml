@@ -27,8 +27,7 @@ training:
     weight_decay: 0.0005
     lr_scheduler: cosine
   unlearning:
-    # Global defaults used by methods that do not expose rich per-method knobs
-    # (notably amnesiac in the current third-party implementation).
+    # Global defaults used by methods that do not expose rich per-method knobs.
     epochs: 3
     batch_size: 128
     lr: 0.00015
@@ -55,41 +54,46 @@ training:
     methods:
       scrub:
         mode: teacher_loaded
-        epochs: 24
-        lr: 0.0008
+        epochs: 30
+        lr: 0.001
         gamma: 0.985
-        distill_weight: 0.03
-        forget_loss_weight: 1.8
-        maximize_epochs: 10
-        maximize_steps: 3
+        distill_weight: 0.015
+        forget_loss_weight: 3.0
+        maximize_epochs: 12
+        maximize_steps: 4
         minimize_steps: 1
-        post_maximize_repair_scale: 0.55
+        post_maximize_repair_scale: 0.5
         kd_temperature: 4.0
         weight_decay: 0
         momentum: 0.9
-        lr_decay_epochs: [14, 20]
+        lr_decay_epochs: [18, 26]
         lr_decay_rate: 0.3
       ssd:
         # selection_weighting (α): selects synapses where forget_importance > α × retain_importance.
         # Higher = more selective (fewer synapses modified). Default 10.
-        selection_weighting: 40
+        selection_weighting: 120
         # dampening_constant (λ): each selected synapse is multiplied by (λ × oimp / fimp).
         # Higher = less aggressive per synapse. Default 1 → weights oimp/fimp (<0.1 for selected).
         # 5 → max 50% reduction at boundary; 10 → zero net change at boundary.
-        dampening_constant: 20
+        dampening_constant: 80
         # Keep remaining SSD parameters at their defaults.
         lower_bound: 1
         exponent: 1
-        min_layer: -1
+        min_layer: 2
         max_layer: -1
         forget_threshold: 1
+        # Wrapper-level retain repair after dampening to recover utility.
+        post_repair_epochs: 2
+        post_repair_lr: 0.0001
+        post_repair_optimizer: adam
+        post_repair_batch_size: 128
       bad_teacher:
         # epochs: number of distillation passes — primary driver of forgetting.
-        epochs: 15
+        epochs: 30
         # kl_temperature: softer distributions from higher T make distillation smoother.
-        kl_temperature: 4.0
+        kl_temperature: 5.0
         # retain_subset_fraction: fraction of retain set used per epoch.
-        retain_subset_fraction: 0.6
+        retain_subset_fraction: 0.25
       amnesiac: {}
 
 unlearning:

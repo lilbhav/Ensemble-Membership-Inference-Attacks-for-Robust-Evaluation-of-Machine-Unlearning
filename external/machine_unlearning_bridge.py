@@ -444,6 +444,37 @@ def main() -> None:
             num_classes=num_classes,
             device=device,
         )
+
+        # SSD can be overly destructive on CIFAR100; allow wrapper-level
+        # retain-only repair epochs after dampening to recover utility.
+        if args.unlearning_method == "ssd":
+            repair_epochs = int(method_cfg.get("post_repair_epochs", 0))
+            if repair_epochs > 0:
+                consumed_method_cfg_keys_by_bridge.update(
+                    {
+                        "post_repair_epochs",
+                        "post_repair_lr",
+                        "post_repair_optimizer",
+                        "post_repair_batch_size",
+                    }
+                )
+                repair_lr = float(method_cfg.get("post_repair_lr", args.lr))
+                repair_opt = str(method_cfg.get("post_repair_optimizer", args.optimizer)).lower()
+                repair_bs = int(method_cfg.get("post_repair_batch_size", args.batch_size))
+                repair_train_loader = DataLoader(retain_ds, batch_size=repair_bs, shuffle=True)
+                repair_test_loader = DataLoader(test_ds, batch_size=repair_bs, shuffle=False)
+
+                # training_optimization accepts optimizer name; we pass lr through args-like namespace.
+                setattr(strategy_args, "lr", repair_lr)
+                model = mu_utils.training_optimization(
+                    model=model,
+                    train_loader=repair_train_loader,
+                    test_loader=repair_test_loader,
+                    epochs=repair_epochs,
+                    device=device,
+                    desc="SSD retain repair",
+                    opt=repair_opt,
+                )
         unlearning_method = args.unlearning_method
 
     train_loader_eval = DataLoader(baseline_train_ds, batch_size=args.batch_size, shuffle=False)
