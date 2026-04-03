@@ -1,5 +1,20 @@
 from __future__ import annotations
 
+"""Bridge entrypoint between this repo and Third_Party_Code/mia-disparity.
+
+How this file works:
+1. Receives normalized CLI args from adapters/mia_disparity_adapter.py.
+2. Loads canonical split artifacts produced by scripts/prepare_splits.py.
+3. Imports attack implementations from mia-disparity and model/dataset code from
+    Third_Party_Code/MachineUnlearning.
+4. Runs one attack on one (model, target, attack_seed) slice.
+5. Normalizes outputs to a stable per-sample CSV schema used by downstream
+    scripts/run_ensemble_eval.py and scripts/aggregate_results.py.
+
+This file keeps third-party attack logic external and centralizes reproducible
+I/O, calibration, and metadata checks.
+"""
+
 import argparse
 import csv
 import json
@@ -79,6 +94,7 @@ def configure_torch_pickle_compat() -> None:
 
 
 def parse_args() -> argparse.Namespace:
+    # CLI contract expected by adapters/mia_disparity_adapter.py.
     p = argparse.ArgumentParser(description="Bridge to mia-disparity attacks")
     p.add_argument("--dataset", required=True, choices=["Cifar10", "Cifar100"])
     p.add_argument("--base-seed", type=int, required=True)
@@ -162,10 +178,6 @@ def get_aux_info(attack, device, num_classes, args):
         "log_path": str(Path(args.output_csv).parent),
         "num_shadow_models": args.num_shadow_models,
         "shadow_diff_init": False,
-        # Each evaluation target (forget_vs_test, retain_vs_test, forget_vs_retain) constructs a
-        # different shadow_target_concat_set with a different length, so keep.npy sizes differ.
-        # Using a target-scoped shadow_path avoids cross-target cache collisions that cause
-        # IndexError when keep.npy size mismatches the current concat dataset size.
         "shadow_path": str(Path(args.output_csv).parent / f"lira_shadows_{Path(args.output_csv).stem}"),
         "augmentation_query": 18,
     }
@@ -241,6 +253,7 @@ def main() -> None:
     # Normalize attack alias names so config can use human-friendly labels
     attack_name = normalize_attack_name(args.attack_name)
 
+    # engine_repo points to Third_Party_Code/mia-disparity.
     engine_repo = Path(args.engine_repo).resolve()
     if not engine_repo.exists():
         raise FileNotFoundError(f"mia-disparity repo not found: {engine_repo}")
@@ -249,10 +262,12 @@ def main() -> None:
             f"mia-disparity repo is missing expected package layout at: {engine_repo / 'miae'}"
         )
 
+    # Dynamically import third-party attack modules from mia-disparity.
     sys.path.insert(0, str(engine_repo))
     configure_torch_pickle_compat()
 
-    # Load split indices produced by prepare_splits.py
+    # Load canonical split indices produced by scripts/prepare_splits.py.
+    # All bridge stages consume these artifacts to guarantee split consistency.
     split_data = np.load(args.split_file)
     retain_indices = split_data["retain_indices"].tolist()
     forget_indices = split_data["forget_indices"].tolist()
@@ -279,7 +294,9 @@ def main() -> None:
     forget_count = int(split_meta.get("forget_count", len(forget_indices)))
     forget_fraction = split_meta.get("forget_fraction")
 
-    # Load dataset/model definitions from external repos
+    # Load dataset/model definitions from external repositories.
+    # We intentionally reuse MachineUnlearning's dataset/model code path so
+    # attack evaluation stays aligned with training/unlearning internals.
     mu_repo = engine_repo.parent / "MachineUnlearning"
     if not (mu_repo / "src" / "__init__.py").exists():
         raise FileNotFoundError(
@@ -301,7 +318,8 @@ def main() -> None:
     test_ds = Subset(test_dataset, test_indices)
     aux_ds = Subset(train_dataset, aux_indices) if len(aux_indices) > 0 else retain_ds
 
-    # Build dataset views for selected target pairing
+    # Build member/non-member views based on requested target definition
+    # (forget_vs_test, retain_vs_test, or forget_vs_retain).
     member_ds, nonmember_ds, member_split_name, nonmember_split_name = pick_target_subsets(
         args.target_name,
         retain_ds,
@@ -325,14 +343,20 @@ def main() -> None:
     ensure_initialize_weights(model)
     ensure_initialize_weights(untrained_model)
 
-    # Prepare attack-specific artifacts (e.g., shadow models) and run inference
+    # Prepare attack-specific artifacts (e.g., shadow models) and run inference.
+    # The concrete implementation class comes from miae.attacks.* modules.
     target_model_access = get_target_model_access(attack_name, model, untrained_model)
     aux_info = get_aux_info(attack_name, device, num_classes, args)
     attack = get_attack(attack_name, aux_info, target_model_access)
 
     attack.prepare(aux_ds)
     pred_scores = np.asarray(attack.infer(target_ds), dtype=float)
+
+    # Normalize score direction so higher scores consistently mean "more likely member".
+    # If raw AUC < 0.5, negate scores before threshold calibration.
     pred_scores, score_direction, auc_after_flip = orient_scores_for_membership(pred_scores, target_membership)
+
+    # Calibrate threshold at target FPR and convert scores to hard predictions.
     calibrated_threshold = compute_threshold_at_target_fpr(target_membership, pred_scores, args.target_fpr)
     calibrated_predictions = (pred_scores >= calibrated_threshold).astype(int)
     calibrated_tpr, calibrated_fpr = confusion_rates(target_membership, calibrated_predictions)
@@ -340,7 +364,8 @@ def main() -> None:
 
     train_size = len(train_dataset)
 
-    # Build standardized per-sample rows expected by downstream ensemble scripts
+    # Build standardized per-sample rows expected by downstream ensemble scripts.
+    # This schema is intentionally stable across attacks and unlearning methods.
     rows = []
     for i, score in enumerate(pred_scores):
         is_member = int(target_membership[i])
@@ -382,7 +407,7 @@ def main() -> None:
             }
         )
 
-    # Write final normalized CSV format
+    # Write canonical per-sample output CSV used by ensemble and aggregation stages.
     output_csv = Path(args.output_csv)
     output_csv.parent.mkdir(parents=True, exist_ok=True)
     fieldnames = [
@@ -411,6 +436,7 @@ def main() -> None:
         writer.writeheader()
         writer.writerows(rows)
 
+    # Save per-run calibration summary for diagnostics and debugging.
     calibration_summary = {
         "dataset": args.dataset,
         "base_seed": args.base_seed,

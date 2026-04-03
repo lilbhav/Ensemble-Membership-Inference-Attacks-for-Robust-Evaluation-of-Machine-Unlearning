@@ -1,4 +1,9 @@
 from __future__ import annotations
+"""Adapter for MIA execution via the mia_disparity bridge.
+
+This class converts framework-level attack parameters into a stable CLI contract
+for external/mia_disparity_bridge.py.
+"""
 
 from pathlib import Path
 
@@ -6,6 +11,8 @@ from adapters.io_utils import run_subprocess
 
 
 class MiaDisparityAdapter:
+    """Thin wrapper that launches one MIA attack run per invocation."""
+
     def __init__(self, project_root: Path, bridge_script: Path) -> None:
         # Store stable paths used by every subprocess invocation
         self.project_root = project_root
@@ -31,6 +38,11 @@ class MiaDisparityAdapter:
         num_shadow_models: int = 10,
         target_fpr: float = 0.01,
     ) -> None:
+        """Run one (dataset, seed, method, attack, target) MIA evaluation.
+
+        The bridge owns data loading, attack execution, score orientation, and
+        output schema. This adapter focuses on argument normalization and launch.
+        """
         # Build bridge command line for one attack/target/model combination
         cmd = [
             "python",
@@ -70,5 +82,6 @@ class MiaDisparityAdapter:
             "--target-fpr",
             str(target_fpr),
         ]
+
         # Run from project root to keep path assumptions consistent
         run_subprocess(cmd, cwd=self.project_root)

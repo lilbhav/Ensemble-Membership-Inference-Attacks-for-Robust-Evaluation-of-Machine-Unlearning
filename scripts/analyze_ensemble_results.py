@@ -4,13 +4,12 @@ Provides insight into key findings from the visualization suite.
 """
 
 import pandas as pd
-import numpy as np
 from pathlib import Path
 
 # Paths
 RESULTS_DIR = Path('results')
 AGGREGATE_DIR = RESULTS_DIR / 'aggregate'
-ENSEMBLE_DIR = RESULTS_DIR / 'ensembles'
+ENSEMBLE_DIR = RESULTS_DIR / 'ensemble'
 METHODS = ['bad_teacher', 'amnesiac']
 
 

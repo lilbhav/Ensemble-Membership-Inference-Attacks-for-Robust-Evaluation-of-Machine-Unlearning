@@ -85,3 +85,5 @@ mlruns/
 *.bak
 
 results/
+project_interview_rundown.md
+scripts/analyze_silent_attacks.py

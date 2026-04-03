@@ -1,5 +1,19 @@
 from __future__ import annotations
 
+"""FPR-sweep diagnostics for attack calibration and ensemble behavior.
+
+This script is a post-MIA analysis utility. It reads per-attack score CSVs,
+re-calibrates each attack at multiple target FPR values, then reports:
+- per-attack coverage/threshold/flip info
+- pairwise attack overlap (Jaccard)
+- OR and k-of-m ensemble metrics across the sweep
+- first activation order of attacks
+
+Outputs are written as fpr_sweep_* CSVs (typically in results/aggregate) and
+are consumed by scripts such as analyze_ensemble_results.py and
+generate_focused_analysis.py.
+"""
+
 import argparse
 import csv
 from itertools import combinations
@@ -10,6 +24,7 @@ from sklearn.metrics import roc_auc_score, roc_curve
 
 
 def parse_args() -> argparse.Namespace:
+    """Parse one dataset/seed/method/target slice plus sweep FPR grid."""
     p = argparse.ArgumentParser(description="Sweep calibrated ensemble behavior across multiple target FPR values.")
     p.add_argument("--results-root", default="results")
     p.add_argument("--dataset", default="Cifar10")
@@ -23,11 +38,13 @@ def parse_args() -> argparse.Namespace:
 
 
 def read_rows(path: Path) -> list[dict]:
+    """Load one per-attack prediction CSV emitted by run_mia.py."""
     with path.open("r", encoding="utf-8") as f:
         return list(csv.DictReader(f))
 
 
 def threshold_at_target_fpr(y: np.ndarray, s: np.ndarray, target_fpr: float) -> float:
+    """Select score threshold achieving target FPR with best available TPR."""
     fpr, tpr, thresholds = roc_curve(y, s)
     eligible = [
         (float(th), float(tv), float(fv))
@@ -41,6 +58,7 @@ def threshold_at_target_fpr(y: np.ndarray, s: np.ndarray, target_fpr: float) -> 
 
 
 def write_csv(path: Path, rows: list[dict], fieldnames: list[str]) -> None:
+    """Write CSV and create parent directories when needed."""
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=fieldnames)
@@ -49,6 +67,7 @@ def write_csv(path: Path, rows: list[dict], fieldnames: list[str]) -> None:
 
 
 def confusion(y: np.ndarray, p: np.ndarray) -> tuple[float, float, float]:
+    """Return (TPR, FPR, accuracy) from binary labels and predictions."""
     pos = y == 1
     neg = y == 0
     tp = int(((p == 1) & pos).sum())
@@ -62,6 +81,7 @@ def confusion(y: np.ndarray, p: np.ndarray) -> tuple[float, float, float]:
 
 
 def jaccard(a: set[int], b: set[int]) -> float:
+    """Set overlap metric for positive sample agreement between attacks."""
     denom = len(a | b)
     if denom == 0:
         return 0.0
@@ -69,12 +89,14 @@ def jaccard(a: set[int], b: set[int]) -> float:
 
 
 def safe_auc(y: np.ndarray, s: np.ndarray) -> float:
+    """AUC helper that returns NaN when only one class is present."""
     if len(np.unique(y)) < 2:
         return float("nan")
     return float(roc_auc_score(y, s))
 
 
 def main() -> None:
+    """Run FPR sweep and emit aggregate diagnostic CSV tables."""
     args = parse_args()
     root = Path(args.results_root)
     out_dir = Path(args.out_dir) if args.out_dir else (root / "aggregate")
@@ -97,6 +119,7 @@ def main() -> None:
     sample_ids: np.ndarray | None = None
 
     for f in files:
+        # Each file corresponds to one attack's per-sample scores for this slice.
         attack = f.parent.name
         rows = read_rows(f)
         if not rows:
@@ -109,6 +132,7 @@ def main() -> None:
             labels = y
             sample_ids = sid
         else:
+            # Enforce aligned sample IDs and labels across attacks before ensembling.
             if len(y) != len(labels) or not np.array_equal(y, labels) or not np.array_equal(sid, sample_ids):
                 raise ValueError(f"Mismatched sample order/labels across attacks; offending file: {f}")
 
@@ -146,6 +170,7 @@ def main() -> None:
     first_active: dict[str, float | None] = {a: None for a in attacks}
 
     for target_fpr in args.fprs:
+        # Calibrate every attack at this target FPR and collect per-attack predictions.
         attack_preds: dict[str, np.ndarray] = {}
         attack_positive_sets: dict[str, set[int]] = {}
 
@@ -188,6 +213,7 @@ def main() -> None:
                 )
 
         for a1, a2 in combinations(attacks, 2):
+            # Pairwise overlap helps quantify attack diversity/complementarity.
             jaccard_rows.append(
                 {
                     "dataset": args.dataset,
@@ -206,6 +232,7 @@ def main() -> None:
         for attack in attacks:
             votes += attack_preds[attack]
 
+        # Evaluate common ensemble decision rules at this calibration point.
         p_or = (votes >= 1).astype(int)
         p_k2 = (votes >= 2).astype(int)
         p_k3 = (votes >= 3).astype(int)
@@ -238,6 +265,7 @@ def main() -> None:
         )
 
     for attack in attacks:
+        # First target FPR where attack becomes active (coverage > 0).
         activation_rows.append(
             {
                 "dataset": args.dataset,
@@ -250,6 +278,7 @@ def main() -> None:
             }
         )
 
+    # Shared prefix consumed by downstream analysis scripts.
     base = f"fpr_sweep_{args.dataset}_seed_{args.seed}_{args.method}_{args.target}_attackseed_{args.attack_seed}"
     write_csv(
         out_dir / f"{base}.csv",

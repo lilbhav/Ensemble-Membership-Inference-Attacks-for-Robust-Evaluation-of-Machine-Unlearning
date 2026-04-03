@@ -1,4 +1,9 @@
 from __future__ import annotations
+"""Adapter for baseline/unlearning orchestration via the machine_unlearning bridge.
+
+This layer keeps script-facing code simple by translating Python method calls into
+normalized CLI invocations of external/machine_unlearning_bridge.py.
+"""
 
 import json
 from pathlib import Path
@@ -8,6 +13,8 @@ from adapters.io_utils import run_subprocess
 
 
 class MachineUnlearningAdapter:
+    """Thin wrapper that launches machine unlearning bridge commands."""
+
     def __init__(self, project_root: Path, bridge_script: Path) -> None:
         # Keep both locations so calls are independent of current working directory
         self.project_root = project_root
@@ -24,6 +31,11 @@ class MachineUnlearningAdapter:
         training_cfg: dict,
         device: str,
     ) -> None:
+        """Run baseline training through the bridge script.
+
+        The bridge is responsible for loading third-party code and writing outputs;
+        this adapter only validates required config and forwards normalized args.
+        """
         required_baseline_keys = ["epochs", "batch_size", "lr", "optimizer", "momentum"]
         missing = [k for k in required_baseline_keys if k not in training_cfg or training_cfg[k] is None]
         if missing:
@@ -64,6 +76,7 @@ class MachineUnlearningAdapter:
             cmd += ["--weight-decay", str(training_cfg["weight_decay"])]
         if training_cfg.get("lr_scheduler"):
             cmd += ["--lr-scheduler", str(training_cfg["lr_scheduler"])]
+
         # Execute from repo root so relative imports/paths in bridge remain stable
         run_subprocess(cmd, cwd=self.project_root)
 
@@ -81,6 +94,11 @@ class MachineUnlearningAdapter:
         device: str,
         run_name: str | None = None,
     ) -> None:
+        """Run one unlearning method through the bridge script.
+
+        Method-specific hyperparameters are serialized to JSON and passed as one
+        argument so the bridge can dispatch to the correct third-party strategy.
+        """
         supported_methods = {"scrub", "ssd", "bad_teacher", "amnesiac"}
         if unlearning_method not in supported_methods:
             raise ValueError(
@@ -144,10 +162,12 @@ class MachineUnlearningAdapter:
             "--momentum",
             str(training_cfg["momentum"]),
             "--method-config-json",
+            # Preserve nested method config structure without lossy flattening.
             json.dumps(method_cfg),
         ]
 
         if run_name:
             cmd.extend(["--run-name", run_name])
 
+        # Delegate execution and error handling to shared subprocess helper.
         run_subprocess(cmd, cwd=self.project_root)

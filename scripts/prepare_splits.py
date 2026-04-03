@@ -1,5 +1,16 @@
 from __future__ import annotations
 
+"""Create canonical targeted_random split artifacts for the full pipeline.
+
+This script is the single source of truth for split generation. It writes:
+- seed_<seed>.npz with retain/forget/test/aux index arrays
+- seed_<seed>.meta.json with split configuration + realized stats
+- seed_<seed>.debug.json with lightweight inspection fields
+
+Downstream scripts (baseline, unlearning, MIA) rely on these files and validate
+metadata to prevent silent split drift.
+"""
+
 import argparse
 import json
 import sys
@@ -14,6 +25,7 @@ from adapters.io_utils import ensure_dir, load_config, resolve_path
 
 
 def parse_args() -> argparse.Namespace:
+    """Parse optional dataset/seed filters and overwrite behavior."""
     p = argparse.ArgumentParser(description="Create canonical retain/forget/test/aux split files")
     p.add_argument("--config", default="configs/experiment.yaml")
     p.add_argument("--dataset")
@@ -34,6 +46,14 @@ def _targeted_random_partition(
     forget_count: int | None,
     rng: np.random.Generator,
 ) -> tuple[dict[str, np.ndarray], dict[str, float | int]]:
+    """Create targeted_random split for one dataset/seed.
+
+    Rules:
+    - Forget samples are drawn only from target_class.
+    - Exactly one of forget_fraction or forget_count must be set.
+    - Retain is all remaining train samples.
+    - Aux is currently emitted as empty for compatibility.
+    """
     target_mask = labels == target_class
     target_indices = indices[target_mask]
 
@@ -84,6 +104,7 @@ def _expected_split_metadata(
     forget_fraction: float | None,
     forget_count: int | None,
 ) -> dict[str, object]:
+    """Build the config fingerprint used to decide split reuse compatibility."""
     forget_spec = "fraction" if forget_fraction is not None else "count"
     return {
         "split_mode": "targeted_random",
@@ -97,6 +118,7 @@ def _expected_split_metadata(
 
 
 def _label_histogram(labels: np.ndarray) -> dict[str, int]:
+    """Return compact class-count map for debug summaries."""
     if labels.size == 0:
         return {}
     values, counts = np.unique(labels, return_counts=True)
@@ -104,6 +126,12 @@ def _label_histogram(labels: np.ndarray) -> dict[str, int]:
 
 
 def _validate_existing_meta(meta_file: Path, expected: dict[str, object]) -> tuple[bool, str]:
+    """Check whether an existing split metadata file matches current config.
+
+    Returns:
+    - (True, "") if compatible and safe to reuse
+    - (False, reason) if missing/incompatible
+    """
     if not meta_file.exists():
         return False, f"Missing metadata file: {meta_file}"
 
@@ -156,6 +184,7 @@ def _validate_existing_meta(meta_file: Path, expected: dict[str, object]) -> tup
 
 
 def _resolve_machine_unlearning_repo(cfg_repo_path: str | Path) -> Path:
+    """Resolve path to Third_Party_Code/MachineUnlearning (with fallback)."""
     # First, trust config path resolution.
     candidate = resolve_path(cfg_repo_path)
     if (candidate / "src" / "__init__.py").exists():
@@ -173,6 +202,7 @@ def _resolve_machine_unlearning_repo(cfg_repo_path: str | Path) -> Path:
 
 
 def main() -> None:
+    """Generate or reuse split artifacts for each requested dataset/seed."""
     # 1) Read config and resolve roots
     args = parse_args()
     cfg = load_config(args.config)
@@ -186,7 +216,7 @@ def main() -> None:
     import sys
 
     sys.path.insert(0, str(mu_repo))
-    from src import dataset as mu_dataset  # type: ignore
+    from src import dataset as mu_dataset 
 
     # 3) Expand optional filters into list form
     datasets = [args.dataset] if args.dataset else cfg["experiment"]["datasets"]
@@ -285,7 +315,7 @@ def main() -> None:
                 aux_indices=np.sort(parts["aux"]),
             )
 
-            # Save a human-readable companion file with split stats
+            # Save a readable companion file with split stats
             meta = {
                 "split_mode": "targeted_random",
                 "dataset": dataset_name,
