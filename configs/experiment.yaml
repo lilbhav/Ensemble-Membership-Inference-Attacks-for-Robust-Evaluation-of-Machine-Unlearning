@@ -39,10 +39,10 @@ training:
     lr_scheduler: cosine
 
   unlearning:
-    # Global defaults used by methods that do not expose method-specific knobs.
-    epochs: 3
-    batch_size: 128
-    lr: 0.00015
+    # Global defaults aligned to the seed-0 SSD reference run.
+    epochs: 1
+    batch_size: 64
+    lr: 0.0001
     optimizer: adam
     momentum: 0.5
 
@@ -88,24 +88,16 @@ training:
         lr_decay_rate: 0.3
 
       ssd:
-        # selection_weighting (α): selects synapses where forget_importance > α × retain_importance.
-        # Higher = more selective (fewer synapses modified). Default 10.
+        # Seed-0 SSD reference hyperparameters.
         selection_weighting: 20
-        # dampening_constant (λ): each selected synapse is multiplied by (λ × oimp / fimp).
-        # Higher = less aggressive per synapse. Default 1 → weights oimp/fimp (<0.1 for selected).
-        # 5 → max 50% reduction at boundary; 10 → zero net change at boundary.
         dampening_constant: 10
-        # Keep remaining SSD parameters at their defaults.
         lower_bound: 1
         exponent: 1
         min_layer: -1
         max_layer: -1
         forget_threshold: 1
-        # Wrapper-level retain repair after dampening to recover utility.
-        post_repair_epochs: 2
-        post_repair_lr: 0.0001
-        post_repair_optimizer: adam
-        post_repair_batch_size: 128
+        # Disable wrapper-side retain repair to match the original reference run.
+        post_repair_epochs: 0
 
       bad_teacher:
         # epochs: number of distillation passes — primary driver of forgetting.
