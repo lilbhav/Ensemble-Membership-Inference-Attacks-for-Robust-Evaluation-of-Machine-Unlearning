@@ -11,7 +11,7 @@ paths:
 
 
 experiment:
-  datasets: [Cifar100]
+  datasets: [Cifar10]
   base_model: ResNet18
   base_seeds: [0]
   device: cuda
@@ -26,7 +26,7 @@ split:
   # Exactly one of forget_fraction or forget_count must be set.
   # This run uses a fixed forget count for stronger and more stable signal.
   forget_fraction: null
-  forget_count: 250
+  forget_count: 500
 
 training:
   baseline:
