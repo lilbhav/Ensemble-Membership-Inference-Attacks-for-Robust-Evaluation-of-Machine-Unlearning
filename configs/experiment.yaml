@@ -69,22 +69,20 @@ training:
     # Method-specific parameters passed to bridge + third-party implementations.
     methods:
       scrub:
-        # teacher_loaded: start SCRUB teacher from baseline checkpoint.
-        # random_init: initialize teacher from scratch.
         mode: teacher_loaded
-        epochs: 20
-        lr: 0.0007
+        epochs: 8
+        lr: 0.0004
         gamma: 0.985
-        distill_weight: 0.03
-        forget_loss_weight: 1.2
-        maximize_epochs: 8
-        maximize_steps: 3
-        minimize_steps: 1
-        post_maximize_repair_scale: 0.6
+        distill_weight: 0.08
+        forget_loss_weight: 0.5
+        maximize_epochs: 3
+        maximize_steps: 2
+        minimize_steps: 2
+        post_maximize_repair_scale: 0.8
         kd_temperature: 4.0
         weight_decay: 0
         momentum: 0.9
-        lr_decay_epochs: [12, 16]
+        lr_decay_epochs: [5, 7]
         lr_decay_rate: 0.3
 
       ssd:
