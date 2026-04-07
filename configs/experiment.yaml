@@ -108,7 +108,8 @@ training:
         retain_subset_fraction: 0.25
 
       # Uses framework/global defaults unless method config is extended.
-      amnesiac: {}
+      amnesiac: 
+        epochs: 5
 
 # Which unlearning methods to run in scripts/run_unlearning.py and downstream steps.
 unlearning:
