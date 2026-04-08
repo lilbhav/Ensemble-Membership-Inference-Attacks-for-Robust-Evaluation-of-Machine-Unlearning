@@ -70,19 +70,19 @@ training:
     methods:
       scrub:
         mode: teacher_loaded
-        epochs: 8
-        lr: 0.0004
+        epochs: 10
+        lr: 0.0005
         gamma: 0.985
-        distill_weight: 0.08
-        forget_loss_weight: 0.5
-        maximize_epochs: 3
+        distill_weight: 0.05
+        forget_loss_weight: 0.7
+        maximize_epochs: 4
         maximize_steps: 2
         minimize_steps: 2
         post_maximize_repair_scale: 0.8
         kd_temperature: 4.0
         weight_decay: 0
         momentum: 0.9
-        lr_decay_epochs: [5, 7]
+        lr_decay_epochs: [6, 8]
         lr_decay_rate: 0.3
 
       ssd:
