@@ -55,6 +55,10 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--momentum", type=float, required=True)
     p.add_argument("--weight-decay", type=float, default=0.0)
     p.add_argument("--lr-scheduler", default="none", choices=["none", "cosine"])
+    p.add_argument("--label-smoothing", type=float, default=0.0)
+    p.add_argument("--train-augment", dest="train_augment", action="store_true")
+    p.add_argument("--no-train-augment", dest="train_augment", action="store_false")
+    p.set_defaults(train_augment=False)
 
     p.add_argument("--unlearning-method", choices=list(SUPPORTED_UNLEARNING_METHODS))
     p.add_argument("--baseline-model")
@@ -64,8 +68,17 @@ def parse_args() -> argparse.Namespace:
 
 
 def train_baseline(
-    model, train_loader, test_loader, device, epochs, lr, optimizer_name, momentum,
-    weight_decay: float = 0.0, lr_scheduler: str = "none"
+    model,
+    train_loader,
+    test_loader,
+    device,
+    epochs,
+    lr,
+    optimizer_name,
+    momentum,
+    weight_decay: float = 0.0,
+    lr_scheduler: str = "none",
+    label_smoothing: float = 0.0,
 ):
     if optimizer_name == "sgd":
         optimizer = torch.optim.SGD(
@@ -83,7 +96,7 @@ def train_baseline(
     else:
         scheduler = None
 
-    loss_func = nn.CrossEntropyLoss().to(device)
+    loss_func = nn.CrossEntropyLoss(label_smoothing=label_smoothing).to(device)
     best_state = None
     max_test_acc = -1.0
 
@@ -385,7 +398,7 @@ def main() -> None:
     train_dataset, test_dataset, num_classes, num_channels = mu_dataset.get_dataset(
         dataset_name=args.dataset,
         root=args.data_root,
-        augment=False,
+        augment=args.train_augment,
     )
     train_size = len(train_dataset)
     test_size = len(test_dataset)
@@ -432,6 +445,7 @@ def main() -> None:
             momentum=args.momentum,
             weight_decay=args.weight_decay,
             lr_scheduler=args.lr_scheduler,
+            label_smoothing=args.label_smoothing,
         )
         unlearning_method = "baseline"
     else:

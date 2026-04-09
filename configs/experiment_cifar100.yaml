@@ -6,8 +6,8 @@ paths:
   mia_disparity_repo: Third_Party_Code/mia-disparity
 
   # Use repository-local folders for Windows/local runs.
-  data_root: /content/drive/MyDrive/unlearning_runs/data
-  results_root: /content/drive/MyDrive/unlearning_runs/results
+  data_root: data
+  results_root: results
 
 experiment:
   datasets: [Cifar100]
@@ -30,13 +30,17 @@ split:
 
 training:
   baseline:
-    epochs: 100
+    # CIFAR-100 benefits from a longer schedule and stronger regularization
+    # than the CIFAR-10 baseline used elsewhere in the repo.
+    epochs: 180
     batch_size: 128
     lr: 0.1
     optimizer: sgd
     momentum: 0.9
     weight_decay: 0.0005
     lr_scheduler: cosine
+    train_augment: true
+    label_smoothing: 0.1
 
   unlearning:
     epochs: 1
