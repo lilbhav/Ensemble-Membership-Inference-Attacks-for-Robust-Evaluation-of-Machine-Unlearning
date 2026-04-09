@@ -6,8 +6,8 @@ paths:
   mia_disparity_repo: Third_Party_Code/mia-disparity
 
   # Use repository-local folders for Windows/local runs.
-  data_root: data
-  results_root: results
+  data_root: /content/drive/MyDrive/unlearning_runs/data
+  results_root: /content/drive/MyDrive/unlearning_runs/results
 
 experiment:
   datasets: [Cifar100]
