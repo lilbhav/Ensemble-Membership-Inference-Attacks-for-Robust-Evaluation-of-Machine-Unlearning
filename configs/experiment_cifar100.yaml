@@ -67,20 +67,28 @@ training:
     methods:
       scrub:
         mode: teacher_loaded
-        epochs: 12
-        lr: 0.0005
-        gamma: 0.985
-        distill_weight: 0.04
-        forget_loss_weight: 0.9
-        maximize_epochs: 4
-        maximize_steps: 2
-        minimize_steps: 2
-        post_maximize_repair_scale: 0.8
+        # Tradeoff-oriented Cifar100 SCRUB setting: stronger than the weak
+        # default run, but well below the previously destructive 30-epoch setup.
+        epochs: 16
+        lr: 0.0007
+        gamma: 0.99
+        distill_weight: 0.03
+        forget_loss_weight: 1.4
+        maximize_epochs: 6
+        maximize_steps: 3
+        minimize_steps: 1
+        post_maximize_repair_scale: 0.7
         kd_temperature: 4.0
         weight_decay: 0
         momentum: 0.9
-        lr_decay_epochs: [7, 10]
+        lr_decay_epochs: [10, 14]
         lr_decay_rate: 0.3
+        # Wrapper-side retain repair after SCRUB can recover some test utility
+        # without touching the third-party implementation.
+        post_repair_epochs: 1
+        post_repair_lr: 0.0002
+        post_repair_optimizer: sgd
+        post_repair_batch_size: 128
 
       ssd:
         selection_weighting: 20

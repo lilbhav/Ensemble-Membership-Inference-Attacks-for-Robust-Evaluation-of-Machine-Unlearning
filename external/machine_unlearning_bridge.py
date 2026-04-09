@@ -488,7 +488,7 @@ def main() -> None:
         test_loader = DataLoader(test_ds, batch_size=args.batch_size, shuffle=False)
 
         strategy_fn_name = f"unlearn_strategies.strategies.{args.unlearning_method}"
-        if args.unlearning_method == "ssd" and int(method_cfg.get("post_repair_epochs", 0)) > 0:
+        if args.unlearning_method in {"ssd", "scrub"} and int(method_cfg.get("post_repair_epochs", 0)) > 0:
             consumed_method_cfg_keys_by_bridge.update(
                 {
                     "post_repair_epochs",
@@ -542,9 +542,9 @@ def main() -> None:
             device=device,
         )
 
-        # SSD can be overly destructive on CIFAR100; allow wrapper-level
-        # retain-only repair epochs after dampening to recover utility.
-        if args.unlearning_method == "ssd":
+        # Aggressive unlearning methods can benefit from a short wrapper-level
+        # retain-only repair pass after the third-party strategy returns.
+        if args.unlearning_method in {"ssd", "scrub"}:
             repair_epochs = int(method_cfg.get("post_repair_epochs", 0))
             if repair_epochs > 0:
                 repair_lr = float(method_cfg.get("post_repair_lr", args.lr))
