@@ -76,25 +76,25 @@ training:
         # → KL = 0 → zero gradient. pre_corrupt_epochs seeds non-zero KL first.
         mode: teacher_loaded
         # Gradient ascent on CE loss on forget set before SCRUB is called.
-        pre_corrupt_epochs: 5
-        pre_corrupt_lr: 0.0015
-        retain_subset_size: 2500
-        epochs: 20
+        pre_corrupt_epochs: 1
+        pre_corrupt_lr: 0.0002
+        retain_subset_size: 5000
+        epochs: 12
         lr: 0.0008
-        gamma: 0.99
-        distill_weight: 0.01
+        gamma: 0.995
+        distill_weight: 0.05
         forget_loss_weight: 1.0
-        maximize_epochs: 8
-        maximize_steps: 3
-        minimize_steps: 1
-        post_maximize_repair_scale: 0.8
+        maximize_epochs: 4
+        maximize_steps: 1
+        minimize_steps: 2
+        post_maximize_repair_scale: 0.5
         kd_temperature: 4.0
         weight_decay: 0
         momentum: 0.9
-        lr_decay_epochs: [12, 17]
+        lr_decay_epochs: [8, 10]
         lr_decay_rate: 0.3
-        post_repair_epochs: 0
-        post_repair_lr: 0.0002
+        post_repair_epochs: 2
+        post_repair_lr: 0.0001
         post_repair_optimizer: sgd
         post_repair_batch_size: 128
 

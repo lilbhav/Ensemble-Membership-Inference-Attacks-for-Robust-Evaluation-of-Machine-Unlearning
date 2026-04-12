@@ -524,11 +524,6 @@ def main() -> None:
                 }
             )
 
-        ignored_params = _ignored_parameters(
-            args.unlearning_method,
-            method_cfg,
-            consumed_by_bridge=consumed_method_cfg_keys_by_bridge,
-        )
         print("Unlearning bridge verification")
         print(f"  method={args.unlearning_method}")
         print(f"  strategy_called={strategy_fn_name}")
@@ -574,6 +569,12 @@ def main() -> None:
                         loss = -corrupt_criterion(model(inputs), labels)
                         loss.backward()
                         corrupt_optimizer.step()
+
+        ignored_params = _ignored_parameters(
+            args.unlearning_method,
+            method_cfg,
+            consumed_by_bridge=consumed_method_cfg_keys_by_bridge,
+        )
 
         # The strategy implementation lives in:
         # Third_Party_Code/MachineUnlearning/unlearn_strategies/strategies.py
@@ -649,10 +650,10 @@ def main() -> None:
         "target_class": int(split_validated["target_class"]),
         "forget_count": int(len(forget_ds)),
         "loader_sizes": {
-            "retain_samples": int(len(retain_ds)),
+            "retain_samples": int(len(retain_loader.dataset)),
             "forget_samples": int(len(forget_ds)),
             "test_samples": int(len(test_ds)),
-            "retain_batches": int(len(DataLoader(retain_ds, batch_size=args.batch_size, shuffle=False))),
+            "retain_batches": int(len(retain_loader)),
             "forget_batches": int(len(DataLoader(forget_ds, batch_size=args.batch_size, shuffle=False))),
             "test_batches": int(len(DataLoader(test_ds, batch_size=args.batch_size, shuffle=False))),
         },
