@@ -34,10 +34,10 @@ training:
     # than the CIFAR-10 baseline used elsewhere in the repo.
     epochs: 180
     batch_size: 128
-    lr: 0.1
+    lr: 0.05
     optimizer: sgd
     momentum: 0.9
-    weight_decay: 0.0005
+    weight_decay: 0.001
     lr_scheduler: cosine
     train_augment: true
     label_smoothing: 0.1
