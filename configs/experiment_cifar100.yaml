@@ -70,26 +70,31 @@ training:
 
     methods:
       scrub:
-        # teacher_loaded can stall forgetting when student and teacher start identical.
-        # random_init breaks that symmetry and gives non-zero maximize gradients.
-        mode: random_init
-        # Stronger forgetting profile for Cifar100; previous setup preserved
-        # too much utility and failed to reduce forget accuracy.
+        # teacher_loaded: teacher = frozen baseline checkpoint.
+        # The maximize phase's KL divergence loss pushes the student away from the
+        # teacher's (=correct) predictions on the forget set, causing forgetting.
+        # random_init was counterproductive: maximizing KL(student||uniform) pushes
+        # the student to be *more* confident, which increases forget_acc.
+        mode: teacher_loaded
+        # CIFAR-100 retain set is 49750 samples (778 batches) vs. 250 forget
+        # samples (4 batches). Without capping, the minimize phase does 65× more
+        # gradient steps than the maximize phase, burying the forget signal.
+        # retain_subset_size caps the retain loader passed to SCRUB in the bridge.
+        retain_subset_size: 2500
         epochs: 20
         lr: 0.0008
-        gamma: 0.985
-        distill_weight: 0.03
-        forget_loss_weight: 2.2
+        gamma: 0.99
+        distill_weight: 0.05
+        forget_loss_weight: 1.0
         maximize_epochs: 8
         maximize_steps: 3
         minimize_steps: 1
-        post_maximize_repair_scale: 0.6
+        post_maximize_repair_scale: 0.8
         kd_temperature: 4.0
         weight_decay: 0
         momentum: 0.9
         lr_decay_epochs: [12, 17]
         lr_decay_rate: 0.3
-        # Disable retain repair first; it can erase forgetting effects.
         post_repair_epochs: 0
         post_repair_lr: 0.0002
         post_repair_optimizer: sgd

@@ -501,6 +501,18 @@ def main() -> None:
         forget_loader = DataLoader(forget_ds, batch_size=args.batch_size, shuffle=False)
         test_loader = DataLoader(test_ds, batch_size=args.batch_size, shuffle=False)
 
+        # For SCRUB: optionally cap the retain set size to reduce the retain/forget
+        # batch imbalance. CIFAR-100 has ~200:1 retain:forget ratio; without capping
+        # the 778-batch minimize phase buries the 4-batch maximize signal.
+        if args.unlearning_method == "scrub":
+            retain_subset_size = int(method_cfg.get("retain_subset_size", 0))
+            if retain_subset_size > 0 and retain_subset_size < len(retain_ds):
+                consumed_method_cfg_keys_by_bridge.add("retain_subset_size")
+                rng_sub = np.random.default_rng(int(args.seed) + 9999)
+                sub_indices = rng_sub.choice(len(retain_ds), size=retain_subset_size, replace=False).tolist()
+                retain_ds_scrub = Subset(retain_ds, sub_indices)
+                retain_loader = DataLoader(retain_ds_scrub, batch_size=args.batch_size, shuffle=True)
+
         strategy_fn_name = f"unlearn_strategies.strategies.{args.unlearning_method}"
         if args.unlearning_method in {"ssd", "scrub"} and int(method_cfg.get("post_repair_epochs", 0)) > 0:
             consumed_method_cfg_keys_by_bridge.update(
