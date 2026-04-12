@@ -552,6 +552,29 @@ def main() -> None:
                 )
 
         # Core handoff: call the selected third-party unlearning algorithm.
+        # Pre-corruption for SCRUB: gradient ascent on CE loss on the forget set.
+        # SCRUB's maximize phase computes KL(teacher||student). With teacher_loaded,
+        # teacher == student == baseline at epoch 1, so KL = 0 and there is no
+        # gradient to initiate forgetting. Pre-corrupting the student first seeds a
+        # non-zero KL so SCRUB's maximize phase has a live signal from epoch 1.
+        if args.unlearning_method == "scrub":
+            pre_corrupt_epochs = int(method_cfg.get("pre_corrupt_epochs", 0))
+            if pre_corrupt_epochs > 0:
+                consumed_method_cfg_keys_by_bridge.update({"pre_corrupt_epochs", "pre_corrupt_lr"})
+                pre_corrupt_lr = float(method_cfg.get("pre_corrupt_lr", 0.001))
+                corrupt_optimizer = torch.optim.Adam(model.parameters(), lr=pre_corrupt_lr)
+                corrupt_criterion = nn.CrossEntropyLoss()
+                model.train()
+                print(f"  scrub_pre_corrupt: {pre_corrupt_epochs} gradient-ascent epochs on forget set, lr={pre_corrupt_lr}")
+                for _ in range(pre_corrupt_epochs):
+                    for inputs, labels in forget_loader:
+                        inputs = inputs.float().to(device)
+                        labels = labels.to(device)
+                        corrupt_optimizer.zero_grad()
+                        loss = -corrupt_criterion(model(inputs), labels)
+                        loss.backward()
+                        corrupt_optimizer.step()
+
         # The strategy implementation lives in:
         # Third_Party_Code/MachineUnlearning/unlearn_strategies/strategies.py
         strategy_fn = getattr(mu_strategies, args.unlearning_method)

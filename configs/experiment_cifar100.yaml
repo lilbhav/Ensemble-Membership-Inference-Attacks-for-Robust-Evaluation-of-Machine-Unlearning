@@ -70,21 +70,19 @@ training:
 
     methods:
       scrub:
-        # teacher_loaded: teacher = frozen baseline checkpoint.
-        # The maximize phase's KL divergence loss pushes the student away from the
-        # teacher's (=correct) predictions on the forget set, causing forgetting.
-        # random_init was counterproductive: maximizing KL(student||uniform) pushes
-        # the student to be *more* confident, which increases forget_acc.
+        # teacher_loaded: teacher = frozen baseline. The maximize phase pushes
+        # the student away from teacher's predictions on forget data.
+        # Pre-corruption is needed because teacher == student at epoch 1
+        # → KL = 0 → zero gradient. pre_corrupt_epochs seeds non-zero KL first.
         mode: teacher_loaded
-        # CIFAR-100 retain set is 49750 samples (778 batches) vs. 250 forget
-        # samples (4 batches). Without capping, the minimize phase does 65× more
-        # gradient steps than the maximize phase, burying the forget signal.
-        # retain_subset_size caps the retain loader passed to SCRUB in the bridge.
+        # Gradient ascent on CE loss on forget set before SCRUB is called.
+        pre_corrupt_epochs: 5
+        pre_corrupt_lr: 0.0015
         retain_subset_size: 2500
         epochs: 20
         lr: 0.0008
         gamma: 0.99
-        distill_weight: 0.05
+        distill_weight: 0.01
         forget_loss_weight: 1.0
         maximize_epochs: 8
         maximize_steps: 3
