@@ -70,14 +70,16 @@ training:
 
     methods:
       scrub:
-        mode: teacher_loaded
+        # teacher_loaded can stall forgetting when student and teacher start identical.
+        # random_init breaks that symmetry and gives non-zero maximize gradients.
+        mode: random_init
         # Stronger forgetting profile for Cifar100; previous setup preserved
         # too much utility and failed to reduce forget accuracy.
         epochs: 20
         lr: 0.0008
         gamma: 0.985
         distill_weight: 0.03
-        forget_loss_weight: 2.0
+        forget_loss_weight: 2.2
         maximize_epochs: 8
         maximize_steps: 3
         minimize_steps: 1
