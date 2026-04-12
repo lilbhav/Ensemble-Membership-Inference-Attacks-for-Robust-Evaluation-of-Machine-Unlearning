@@ -44,10 +44,10 @@ training:
 
   unlearning:
     epochs: 1
-    batch_size: 128
+    batch_size: 64
     lr: 0.0001
-    optimizer: sgd
-    momentum: 0.9
+    optimizer: adam
+    momentum: 0.5
 
     scrub_sweep:
       - name: scrub_default
