@@ -71,25 +71,24 @@ training:
     methods:
       scrub:
         mode: teacher_loaded
-        # Tradeoff-oriented Cifar100 SCRUB setting: stronger than the weak
-        # default run, but well below the previously destructive 30-epoch setup.
-        epochs: 16
-        lr: 0.0007
-        gamma: 0.99
+        # Stronger forgetting profile for Cifar100; previous setup preserved
+        # too much utility and failed to reduce forget accuracy.
+        epochs: 20
+        lr: 0.0008
+        gamma: 0.985
         distill_weight: 0.03
-        forget_loss_weight: 1.4
-        maximize_epochs: 6
+        forget_loss_weight: 2.0
+        maximize_epochs: 8
         maximize_steps: 3
         minimize_steps: 1
-        post_maximize_repair_scale: 0.7
+        post_maximize_repair_scale: 0.6
         kd_temperature: 4.0
         weight_decay: 0
         momentum: 0.9
-        lr_decay_epochs: [10, 14]
+        lr_decay_epochs: [12, 17]
         lr_decay_rate: 0.3
-        # Wrapper-side retain repair after SCRUB can recover some test utility
-        # without touching the third-party implementation.
-        post_repair_epochs: 1
+        # Disable retain repair first; it can erase forgetting effects.
+        post_repair_epochs: 0
         post_repair_lr: 0.0002
         post_repair_optimizer: sgd
         post_repair_batch_size: 128
@@ -111,7 +110,7 @@ training:
         retain_subset_fraction: 0.25
 
       amnesiac:
-        epochs: 4
+        epochs: 5
 
 unlearning:
   methods: [amnesiac, bad_teacher, scrub, ssd]
