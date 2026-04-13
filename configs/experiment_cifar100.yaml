@@ -115,7 +115,11 @@ training:
         retain_subset_fraction: 0.25
 
       amnesiac:
-        epochs: 5
+        # Best from 4-run grid sweep on seed 0:
+        # forget_acc=4.73, test_acc=70.58, utility_drop=7.52 (baseline 78.11)
+        epochs: 8
+        optimizer: adam
+        batch_size: 64
 
 unlearning:
   methods: [amnesiac, bad_teacher, scrub, ssd]
