@@ -640,6 +640,26 @@ def main() -> None:
     if args.run_name:
         metrics["run_name"] = args.run_name
 
+    # Loader sizes for debug: baseline mode uses train_loader_eval, unlearn uses retain_loader
+    if args.mode == "baseline":
+        loader_sizes = {
+            "retain_samples": int(len(train_loader_eval.dataset)),
+            "forget_samples": int(len(forget_ds)),
+            "test_samples": int(len(test_ds)),
+            "retain_batches": int(len(train_loader_eval)),
+            "forget_batches": int(len(DataLoader(forget_ds, batch_size=args.batch_size, shuffle=False))),
+            "test_batches": int(len(DataLoader(test_ds, batch_size=args.batch_size, shuffle=False))),
+        }
+    else:
+        loader_sizes = {
+            "retain_samples": int(len(retain_loader.dataset)),
+            "forget_samples": int(len(forget_ds)),
+            "test_samples": int(len(test_ds)),
+            "retain_batches": int(len(retain_loader)),
+            "forget_batches": int(len(DataLoader(forget_ds, batch_size=args.batch_size, shuffle=False))),
+            "test_batches": int(len(DataLoader(test_ds, batch_size=args.batch_size, shuffle=False))),
+        }
+
     debug_payload = {
         "mode": args.mode,
         "method": unlearning_method,
@@ -649,14 +669,7 @@ def main() -> None:
         "split_metadata_path_loaded": str(split_meta_path),
         "target_class": int(split_validated["target_class"]),
         "forget_count": int(len(forget_ds)),
-        "loader_sizes": {
-            "retain_samples": int(len(retain_loader.dataset)),
-            "forget_samples": int(len(forget_ds)),
-            "test_samples": int(len(test_ds)),
-            "retain_batches": int(len(retain_loader)),
-            "forget_batches": int(len(DataLoader(forget_ds, batch_size=args.batch_size, shuffle=False))),
-            "test_batches": int(len(DataLoader(test_ds, batch_size=args.batch_size, shuffle=False))),
-        },
+        "loader_sizes": loader_sizes,
         "method_hyperparameters_passed": method_cfg,
         "consumed_method_cfg_keys_by_bridge": sorted(consumed_method_cfg_keys_by_bridge),
         "scrub_teacher_source": scrub_teacher_source,
