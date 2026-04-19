@@ -6,6 +6,8 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
+import numpy as np
+
 # Add project root to path so imports work regardless of cwd
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -35,41 +37,30 @@ def jaccard(a: set[int], b: set[int]) -> float:
     return len(a.intersection(b)) / u
 
 
-def calibrate_predictions_exact_fpr(
-    labels_by_sid: dict[int, int],
-    scores_by_sid: dict[int, float],
-    target_fpr: float,
-) -> tuple[dict[int, int], float]:
-    """Deterministically enforce an exact non-member FP budget at target FPR."""
-    target_fpr = float(max(0.0, min(1.0, target_fpr)))
-    predictions = {sid: 0 for sid in labels_by_sid}
+def metrics_at_target_fpr(labels: np.ndarray, scores: np.ndarray, target_fpr: float) -> tuple[float, float, float, float]:
+    """Return (tpr, fpr, acc, threshold) at best ROC point with FPR <= target_fpr."""
+    from sklearn.metrics import roc_curve  # type: ignore
 
-    nonmember_ids = [sid for sid, y in labels_by_sid.items() if int(y) == 0]
-    member_ids = [sid for sid, y in labels_by_sid.items() if int(y) == 1]
-    n_nonmembers = len(nonmember_ids)
+    if len(np.unique(labels)) < 2:
+        return 0.0, 0.0, 0.0, float(np.max(scores) + 1e-12)
 
-    if n_nonmembers == 0:
-        return predictions, float("inf")
+    fpr_arr, tpr_arr, thresholds = roc_curve(labels, scores)
+    eligible = [
+        (float(thr), float(tpr), float(fpr))
+        for fpr, tpr, thr in zip(fpr_arr, tpr_arr, thresholds)
+        if fpr <= target_fpr
+    ]
 
-    fp_budget = int(round(target_fpr * n_nonmembers))
-    fp_budget = max(0, min(fp_budget, n_nonmembers))
-
-    ranked_nonmembers = sorted(nonmember_ids, key=lambda sid: (-float(scores_by_sid[sid]), int(sid)))
-    selected_nonmembers = set(ranked_nonmembers[:fp_budget])
-
-    if fp_budget > 0:
-        cutoff = float(scores_by_sid[ranked_nonmembers[fp_budget - 1]])
+    if eligible:
+        threshold, tpr, fpr = max(eligible, key=lambda item: (item[1], -item[2], item[0]))
     else:
-        cutoff = max(float(scores_by_sid[sid]) for sid in scores_by_sid) + 1e-12
+        threshold = float(np.max(scores) + 1e-12)
+        tpr = 0.0
+        fpr = 0.0
 
-    for sid in selected_nonmembers:
-        predictions[sid] = 1
-
-    for sid in member_ids:
-        if float(scores_by_sid[sid]) >= cutoff:
-            predictions[sid] = 1
-
-    return predictions, cutoff
+    preds = (scores >= threshold).astype(int)
+    acc = float((preds == labels).mean()) if len(labels) > 0 else 0.0
+    return float(tpr), float(fpr), acc, float(threshold)
 
 
 def main() -> None:
@@ -106,20 +97,15 @@ def main() -> None:
                     for file in attack_files:
                         attack_name = file.parent.name
                         rows = read_rows(file)
-                        sample_scores = {}
-                        local_labels = {}
+                        sample_prediction = {}
                         for r in rows:
                             sid = int(r["sample_id"])
-                            sample_scores[sid] = float(r["score"])
-                            local_labels[sid] = int(r["true_membership"])
+                            pred = int(r["prediction"])
+                            sample_prediction[sid] = pred
+                            true_membership[sid] = int(r["true_membership"])
 
-                        calibrated_pred, _ = calibrate_predictions_exact_fpr(local_labels, sample_scores, target_fpr)
-                        positives = {sid for sid, pred in calibrated_pred.items() if int(pred) == 1}
-
-                        for sid, label in local_labels.items():
-                            true_membership[sid] = label
-
-                        attack_to_sample_prediction[attack_name] = calibrated_pred
+                        positives = {sid for sid, pred in sample_prediction.items() if pred == 1}
+                        attack_to_sample_prediction[attack_name] = sample_prediction
                         attack_to_positive[attack_name] = positives
 
                     attacks = sorted(attack_to_sample_prediction.keys())
@@ -186,17 +172,24 @@ def main() -> None:
                         writer.writerows(coverage_rows)
 
                     ensemble_rows = []
+                    metric_rows = []
 
                     vote_count_by_sid = {
                         sid: sum(attack_to_sample_prediction[a].get(sid, 0) for a in attacks)
                         for sid in all_sample_ids
                     }
 
-                    # 3) OR voting with exact-FPR calibration
+                    labels_arr = np.asarray([int(true_membership[sid]) for sid in all_sample_ids], dtype=int)
+
+                    # 3) OR voting: use vote counts as scores and evaluate on ROC at target FPR
                     if cfg["ensemble"]["voting_rules"].get("or", False):
-                        or_scores = {sid: 1.0 if vote_count_by_sid[sid] >= 1 else 0.0 for sid in all_sample_ids}
-                        or_predictions, _ = calibrate_predictions_exact_fpr(true_membership, or_scores, target_fpr)
-                        for sid in all_sample_ids:
+                        or_scores = np.asarray(
+                            [float(vote_count_by_sid[sid]) if vote_count_by_sid[sid] >= 1 else 0.0 for sid in all_sample_ids],
+                            dtype=float,
+                        )
+                        tpr, fpr, acc, thr = metrics_at_target_fpr(labels_arr, or_scores, target_fpr)
+                        or_predictions = (or_scores >= thr).astype(int)
+                        for idx, sid in enumerate(all_sample_ids):
                             ensemble_rows.append(
                                 {
                                     "dataset": dataset,
@@ -207,18 +200,36 @@ def main() -> None:
                                     "k": 1,
                                     "m": m,
                                     "sample_id": sid,
-                                    "prediction": int(or_predictions[sid]),
+                                    "prediction": int(or_predictions[idx]),
                                     "true_membership": true_membership[sid],
                                 }
                             )
+                        metric_rows.append(
+                            {
+                                "dataset": dataset,
+                                "base_seed": seed,
+                                "unlearning_method": method,
+                                "target": target,
+                                "rule": "or",
+                                "k": 1,
+                                "m": m,
+                                "tpr": tpr,
+                                "fpr": fpr,
+                                "accuracy": acc,
+                            }
+                        )
 
-                    # 4) k-of-m voting with exact-FPR calibration
+                    # 4) k-of-m voting: use vote counts as scores and evaluate on ROC at target FPR
                     for k in k_values:
                         if k > m:
                             continue
-                        k_scores = {sid: 1.0 if vote_count_by_sid[sid] >= k else 0.0 for sid in all_sample_ids}
-                        k_predictions, _ = calibrate_predictions_exact_fpr(true_membership, k_scores, target_fpr)
-                        for sid in all_sample_ids:
+                        k_scores = np.asarray(
+                            [float(vote_count_by_sid[sid]) if vote_count_by_sid[sid] >= k else 0.0 for sid in all_sample_ids],
+                            dtype=float,
+                        )
+                        tpr, fpr, acc, thr = metrics_at_target_fpr(labels_arr, k_scores, target_fpr)
+                        k_predictions = (k_scores >= thr).astype(int)
+                        for idx, sid in enumerate(all_sample_ids):
                             ensemble_rows.append(
                                 {
                                     "dataset": dataset,
@@ -229,10 +240,24 @@ def main() -> None:
                                     "k": k,
                                     "m": m,
                                     "sample_id": sid,
-                                    "prediction": int(k_predictions[sid]),
+                                    "prediction": int(k_predictions[idx]),
                                     "true_membership": true_membership[sid],
                                 }
                             )
+                        metric_rows.append(
+                            {
+                                "dataset": dataset,
+                                "base_seed": seed,
+                                "unlearning_method": method,
+                                "target": target,
+                                "rule": "k_of_m",
+                                "k": k,
+                                "m": m,
+                                "tpr": tpr,
+                                "fpr": fpr,
+                                "accuracy": acc,
+                            }
+                        )
 
                     with (out_dir / "ensemble_per_sample.csv").open("w", newline="", encoding="utf-8") as f:
                         writer = csv.DictWriter(
@@ -242,40 +267,7 @@ def main() -> None:
                         writer.writeheader()
                         writer.writerows(ensemble_rows)
 
-                    # 5) Summarize ensemble predictions into TPR/FPR/Accuracy
-                    summary = defaultdict(lambda: {"tp": 0, "fp": 0, "tn": 0, "fn": 0})
-                    for r in ensemble_rows:
-                        key = (r["rule"], int(r["k"]), int(r["m"]))
-                        y = int(r["true_membership"])
-                        p = int(r["prediction"])
-                        if y == 1 and p == 1:
-                            summary[key]["tp"] += 1
-                        elif y == 0 and p == 1:
-                            summary[key]["fp"] += 1
-                        elif y == 0 and p == 0:
-                            summary[key]["tn"] += 1
-                        else:
-                            summary[key]["fn"] += 1
-
-                    metric_rows = []
-                    for (rule, k, m_val), c in summary.items():
-                        tpr = c["tp"] / max(1, c["tp"] + c["fn"])
-                        fpr = c["fp"] / max(1, c["fp"] + c["tn"])
-                        acc = (c["tp"] + c["tn"]) / max(1, c["tp"] + c["tn"] + c["fp"] + c["fn"])
-                        metric_rows.append(
-                            {
-                                "dataset": dataset,
-                                "base_seed": seed,
-                                "unlearning_method": method,
-                                "target": target,
-                                "rule": rule,
-                                "k": k,
-                                "m": m_val,
-                                "tpr": tpr,
-                                "fpr": fpr,
-                                "accuracy": acc,
-                            }
-                        )
+                    # 5) Save per-rule ROC-derived metrics at the configured target FPR.
 
                     with (out_dir / "ensemble_metrics.csv").open("w", newline="", encoding="utf-8") as f:
                         writer = csv.DictWriter(
