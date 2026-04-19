@@ -61,6 +61,50 @@ def compute_threshold_at_target_fpr(labels: np.ndarray, scores: np.ndarray, targ
     return float(np.max(scores) + 1e-12)
 
 
+def calibrate_predictions_at_exact_fpr(
+    labels: np.ndarray,
+    scores: np.ndarray,
+    target_fpr: float,
+) -> tuple[np.ndarray, float, float]:
+    """Calibrate predictions to an exact non-member FP budget at target FPR.
+
+    This uses a deterministic top-k selection on non-member scores, where
+    k = round(target_fpr * n_nonmembers). Non-members are tie-broken by index.
+    Members are then thresholded at the resulting cutoff to keep a consistent
+    score-based operating point while matching the exact FP count.
+    """
+    target_fpr = float(max(0.0, min(1.0, target_fpr)))
+    n = int(labels.shape[0])
+    predictions = np.zeros(n, dtype=int)
+
+    nonmember_idx = np.where(labels == 0)[0]
+    member_idx = np.where(labels == 1)[0]
+    n_nonmembers = int(nonmember_idx.shape[0])
+
+    if n_nonmembers == 0:
+        return predictions, float(np.max(scores) + 1e-12), 0.0
+
+    fp_budget = int(round(target_fpr * n_nonmembers))
+    fp_budget = max(0, min(fp_budget, n_nonmembers))
+
+    ranked_nonmembers = sorted(nonmember_idx.tolist(), key=lambda i: (-float(scores[i]), int(i)))
+    selected_nonmembers = set(ranked_nonmembers[:fp_budget])
+
+    if fp_budget > 0:
+        cutoff = float(scores[ranked_nonmembers[fp_budget - 1]])
+    else:
+        cutoff = float(np.max(scores) + 1e-12)
+
+    for i in nonmember_idx.tolist():
+        predictions[i] = 1 if i in selected_nonmembers else 0
+
+    for i in member_idx.tolist():
+        predictions[i] = 1 if float(scores[i]) >= cutoff else 0
+
+    achieved_fpr = float(fp_budget / max(1, n_nonmembers))
+    return predictions, cutoff, achieved_fpr
+
+
 def confusion_rates(labels: np.ndarray, predictions: np.ndarray) -> tuple[float, float]:
     member_mask = labels == 1
     nonmember_mask = labels == 0
@@ -356,10 +400,13 @@ def main() -> None:
     # If raw AUC < 0.5, negate scores before threshold calibration.
     pred_scores, score_direction, auc_after_flip = orient_scores_for_membership(pred_scores, target_membership)
 
-    # Calibrate threshold at target FPR and convert scores to hard predictions.
-    calibrated_threshold = compute_threshold_at_target_fpr(target_membership, pred_scores, args.target_fpr)
-    calibrated_predictions = (pred_scores >= calibrated_threshold).astype(int)
-    calibrated_tpr, calibrated_fpr = confusion_rates(target_membership, calibrated_predictions)
+    # Calibrate predictions at an exact FP budget for the configured target FPR.
+    calibrated_predictions, calibrated_threshold, calibrated_fpr = calibrate_predictions_at_exact_fpr(
+        target_membership,
+        pred_scores,
+        args.target_fpr,
+    )
+    calibrated_tpr, _ = confusion_rates(target_membership, calibrated_predictions)
     coverage_fraction = float(np.mean(calibrated_predictions)) if len(calibrated_predictions) > 0 else 0.0
 
     train_size = len(train_dataset)

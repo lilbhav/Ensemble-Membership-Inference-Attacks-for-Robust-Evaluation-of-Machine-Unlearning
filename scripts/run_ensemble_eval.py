@@ -35,6 +35,43 @@ def jaccard(a: set[int], b: set[int]) -> float:
     return len(a.intersection(b)) / u
 
 
+def calibrate_predictions_exact_fpr(
+    labels_by_sid: dict[int, int],
+    scores_by_sid: dict[int, float],
+    target_fpr: float,
+) -> tuple[dict[int, int], float]:
+    """Deterministically enforce an exact non-member FP budget at target FPR."""
+    target_fpr = float(max(0.0, min(1.0, target_fpr)))
+    predictions = {sid: 0 for sid in labels_by_sid}
+
+    nonmember_ids = [sid for sid, y in labels_by_sid.items() if int(y) == 0]
+    member_ids = [sid for sid, y in labels_by_sid.items() if int(y) == 1]
+    n_nonmembers = len(nonmember_ids)
+
+    if n_nonmembers == 0:
+        return predictions, float("inf")
+
+    fp_budget = int(round(target_fpr * n_nonmembers))
+    fp_budget = max(0, min(fp_budget, n_nonmembers))
+
+    ranked_nonmembers = sorted(nonmember_ids, key=lambda sid: (-float(scores_by_sid[sid]), int(sid)))
+    selected_nonmembers = set(ranked_nonmembers[:fp_budget])
+
+    if fp_budget > 0:
+        cutoff = float(scores_by_sid[ranked_nonmembers[fp_budget - 1]])
+    else:
+        cutoff = max(float(scores_by_sid[sid]) for sid in scores_by_sid) + 1e-12
+
+    for sid in selected_nonmembers:
+        predictions[sid] = 1
+
+    for sid in member_ids:
+        if float(scores_by_sid[sid]) >= cutoff:
+            predictions[sid] = 1
+
+    return predictions, cutoff
+
+
 def main() -> None:
     # 1) Load configuration and optional CLI filters
     args = parse_args()
@@ -45,6 +82,7 @@ def main() -> None:
     seeds = [args.seed] if args.seed is not None else cfg["experiment"]["base_seeds"]
     methods = [args.method] if args.method else ["baseline", *cfg["unlearning"]["methods"]]
     targets = [args.target] if args.target else cfg["mia"]["targets"]
+    target_fpr = float(cfg.get("mia", {}).get("target_fpr", 0.05))
 
     k_values = [int(k) for k in cfg["ensemble"]["voting_rules"].get("k_of_m", [])]
 
@@ -68,16 +106,20 @@ def main() -> None:
                     for file in attack_files:
                         attack_name = file.parent.name
                         rows = read_rows(file)
-                        sample_prediction = {}
-                        positives = set()
+                        sample_scores = {}
+                        local_labels = {}
                         for r in rows:
                             sid = int(r["sample_id"])
-                            pred = int(r["prediction"])
-                            sample_prediction[sid] = pred
-                            true_membership[sid] = int(r["true_membership"])
-                            if pred == 1:
-                                positives.add(sid)
-                        attack_to_sample_prediction[attack_name] = sample_prediction
+                            sample_scores[sid] = float(r["score"])
+                            local_labels[sid] = int(r["true_membership"])
+
+                        calibrated_pred, _ = calibrate_predictions_exact_fpr(local_labels, sample_scores, target_fpr)
+                        positives = {sid for sid, pred in calibrated_pred.items() if int(pred) == 1}
+
+                        for sid, label in local_labels.items():
+                            true_membership[sid] = label
+
+                        attack_to_sample_prediction[attack_name] = calibrated_pred
                         attack_to_positive[attack_name] = positives
 
                     attacks = sorted(attack_to_sample_prediction.keys())
@@ -145,11 +187,16 @@ def main() -> None:
 
                     ensemble_rows = []
 
-                    # 3) OR voting: positive if any attack votes positive
+                    vote_count_by_sid = {
+                        sid: sum(attack_to_sample_prediction[a].get(sid, 0) for a in attacks)
+                        for sid in all_sample_ids
+                    }
+
+                    # 3) OR voting with exact-FPR calibration
                     if cfg["ensemble"]["voting_rules"].get("or", False):
+                        or_scores = {sid: 1.0 if vote_count_by_sid[sid] >= 1 else 0.0 for sid in all_sample_ids}
+                        or_predictions, _ = calibrate_predictions_exact_fpr(true_membership, or_scores, target_fpr)
                         for sid in all_sample_ids:
-                            votes = sum(attack_to_sample_prediction[a].get(sid, 0) for a in attacks)
-                            pred = 1 if votes >= 1 else 0
                             ensemble_rows.append(
                                 {
                                     "dataset": dataset,
@@ -160,18 +207,18 @@ def main() -> None:
                                     "k": 1,
                                     "m": m,
                                     "sample_id": sid,
-                                    "prediction": pred,
+                                    "prediction": int(or_predictions[sid]),
                                     "true_membership": true_membership[sid],
                                 }
                             )
 
-                    # 4) k-of-m voting: positive if at least k attacks vote positive
+                    # 4) k-of-m voting with exact-FPR calibration
                     for k in k_values:
                         if k > m:
                             continue
+                        k_scores = {sid: 1.0 if vote_count_by_sid[sid] >= k else 0.0 for sid in all_sample_ids}
+                        k_predictions, _ = calibrate_predictions_exact_fpr(true_membership, k_scores, target_fpr)
                         for sid in all_sample_ids:
-                            votes = sum(attack_to_sample_prediction[a].get(sid, 0) for a in attacks)
-                            pred = 1 if votes >= k else 0
                             ensemble_rows.append(
                                 {
                                     "dataset": dataset,
@@ -182,7 +229,7 @@ def main() -> None:
                                     "k": k,
                                     "m": m,
                                     "sample_id": sid,
-                                    "prediction": pred,
+                                    "prediction": int(k_predictions[sid]),
                                     "true_membership": true_membership[sid],
                                 }
                             )
