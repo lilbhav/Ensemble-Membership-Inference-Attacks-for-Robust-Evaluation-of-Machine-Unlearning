@@ -38,29 +38,29 @@ def jaccard(a: set[int], b: set[int]) -> float:
 
 
 def metrics_at_target_fpr(labels: np.ndarray, scores: np.ndarray, target_fpr: float) -> tuple[float, float, float, float]:
-    """Return (tpr, fpr, acc, threshold) at best ROC point with FPR <= target_fpr."""
+    """Return (tpr, fpr, acc, threshold) at exact target FPR from ROC curve.
+
+    TPR is linearly interpolated on the ROC curve at target_fpr so every rule
+    reports at the same operating point. Accuracy is computed at the closest
+    discrete threshold and is provided as a supportive metric.
+    """
     from sklearn.metrics import roc_curve  # type: ignore
 
     if len(np.unique(labels)) < 2:
-        return 0.0, 0.0, 0.0, float(np.max(scores) + 1e-12)
+        return 0.0, float(target_fpr), 0.0, float(np.max(scores) + 1e-12)
 
     fpr_arr, tpr_arr, thresholds = roc_curve(labels, scores)
-    eligible = [
-        (float(thr), float(tpr), float(fpr))
-        for fpr, tpr, thr in zip(fpr_arr, tpr_arr, thresholds)
-        if fpr <= target_fpr
-    ]
 
-    if eligible:
-        threshold, tpr, fpr = max(eligible, key=lambda item: (item[1], -item[2], item[0]))
-    else:
-        threshold = float(np.max(scores) + 1e-12)
-        tpr = 0.0
-        fpr = 0.0
+    # sklearn ROC is monotonic in FPR; interpolate to the exact target point.
+    tpr = float(np.interp(float(target_fpr), fpr_arr, tpr_arr))
+
+    # Choose a nearby discrete threshold for per-sample predictions/accuracy.
+    best_idx = int(np.argmin(np.abs(fpr_arr - float(target_fpr))))
+    threshold = float(thresholds[best_idx])
 
     preds = (scores >= threshold).astype(int)
     acc = float((preds == labels).mean()) if len(labels) > 0 else 0.0
-    return float(tpr), float(fpr), acc, float(threshold)
+    return float(tpr), float(target_fpr), acc, float(threshold)
 
 
 def main() -> None:
